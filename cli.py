@@ -203,6 +203,9 @@ def commande_tout(args):
     print("\n[7/7] génération G-code")
     etape_gcode(args, config)
 
+    print("\n[8/8] prévisualisation")
+    img_process.previsualiser_gcode(args.sortie)
+
     print("\n✅ pipeline terminé avec succès")
     print(f"   fichiers G-code disponibles dans : {os.path.join(args.sortie, '7-gcode')}")
 
@@ -255,6 +258,14 @@ def commande_config_defaut(args):
         json.dump(DEFAUTS, f, indent=2, ensure_ascii=False)
     print(f"✅ configuration par défaut écrite dans : {chemin}")
 
+def commande_previsualiser(args):
+    img_process.previsualiser_gcode(
+        args.sortie,
+        dpi=args.dpi,
+        marge_mm=args.marge_mm,
+        epaisseur_trait=args.epaisseur_trait,
+        afficher_deplacements=args.afficher_deplacements,
+    )
 
 # -----------------------------------------------------------------------------
 # Construction du parser
@@ -373,6 +384,19 @@ def construire_parser():
     p_cfg.add_argument("--sortie", "-s", required=True,
                        help="chemin du fichier JSON à créer")
     p_cfg.set_defaults(func=commande_config_defaut)
+
+    p_prev = sub.add_parser("previsualiser",
+                            help="étape 8 : génère une image PNG du résultat")
+    ajouter_args_communs(p_prev)
+    p_prev.add_argument("--dpi", type=int, default=150,
+                        help="résolution de l'image (défaut: 150)")
+    p_prev.add_argument("--marge-mm", type=float, default=10,
+                        help="marge en mm autour du dessin (défaut: 10)")
+    p_prev.add_argument("--epaisseur-trait", type=float, default=1.0,
+                        help="épaisseur des traits en pixels (défaut: 1.0)")
+    p_prev.add_argument("--afficher-deplacements", action="store_true",
+                        help="dessine les déplacements à vide en pointillés")
+    p_prev.set_defaults(func=commande_previsualiser)
 
     return parser
 

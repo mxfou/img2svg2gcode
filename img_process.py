@@ -7,7 +7,7 @@
 from scipy.spatial import cKDTree
 import numpy as np
 import gmic, os, math
-from PIL import Image
+from PIL import Image, ImageDraw
 from autotrace import Bitmap
 
 import svgpathtools, json
@@ -380,3 +380,249 @@ def generer_gcode(dossier, hauteur_deplacement, hauteur_ecriture):
             g.rapid(z=5)
             g.rapid(x=0, y=0)
             g.teardown()
+
+def previsualiser_gcode(dossier, dpi=150, marge_mm=10,
+                        epaisseur_trait=3.0, fond="white",
+                        afficher_deplacements=False):
+    """
+    Génère une image PNG par fichier G-code + une image composite finale
+    superposant les 4 couleurs CMJN.
+
+    Paramètres
+    ----------
+    dossier : str
+        Dossier racine du projet (celui qui contient 7-gcode).
+    dpi : int
+        Résolution de l'image générée. 150 dpi donne une bonne qualité.
+    marge_mm : float
+        Marge blanche autour du dessin, en millimètres.
+    epaisseur_trait : float
+        Épaisseur du trait dessiné, en pixels.
+    fond : str
+        Couleur de fond ("white", "black", ou code hex).
+    afficher_deplacements : bool
+        Si True, dessine aussi les déplacements à vide en pointillés gris
+        (utile pour visualiser le parcours machine et l'efficacité de
+        l'optimisation k-d tree).
+    """
+    
+
+    dossier_entree = "7-gcode"
+    dossier_sortie = "8-preview"
+    chemin_entree = os.path.join(dossier, dossier_entree)
+    chemin_sortie = os.path.join(dossier, dossier_sortie)
+    if not dossier_sortie in os.listdir(dossier):
+        os.mkdir(chemin_sortie)
+
+    # Couleurs CMJN au format RGB pour le rendu
+    couleurs_rgb = {
+        "cyan":    (0, 174, 239),
+        "magenta": (236, 0, 140),
+        "yellow":  (255, 242, 0),
+        "black":   (0, 0, 0),
+    }
+
+    # --- Première passe : parser tous les fichiers et calculer la bbox globale ---
+    print("analyse des fichiers G-code...")
+    donnees_par_couleur = {}  # couleur -> liste de (segments_traces, deplacements)
+    bbox = [float("inf"), float("inf"), float("-inf"), float("-inf")]  # xmin, ymin, xmax, ymax
+
+    liste_fichiers = sorted(os.listdir(chemin_entree))
+    for fich in liste_fichiers:
+        if not fich.endswith(".gcode"):
+            continue
+        couleur = fich.replace(".gcode", "")
+        if couleur not in couleurs_rgb:
+            print(f"  ⚠️  couleur inconnue ignorée : {fich}")
+            continue
+
+        chemin_fichier = os.path.join(chemin_entree, fich)
+        traces, deplacements = _parser_gcode(chemin_fichier)
+        donnees_par_couleur[couleur] = (traces, deplacements)
+        print(f"  {fich} : {len(traces)} traits, {len(deplacements)} déplacements à vide")
+
+        # Mise à jour de la bbox
+        for (x0, y0, x1, y1) in traces:
+            bbox[0] = min(bbox[0], x0, x1)
+            bbox[1] = min(bbox[1], y0, y1)
+            bbox[2] = max(bbox[2], x0, x1)
+            bbox[3] = max(bbox[3], y0, y1)
+
+    if bbox[0] == float("inf"):
+        print("⚠️  aucun trait trouvé dans les G-code")
+        return
+
+    xmin, ymin, xmax, ymax = bbox
+    largeur_mm = (xmax - xmin) + 2 * marge_mm
+    hauteur_mm = (ymax - ymin) + 2 * marge_mm
+    print(f"dimensions du dessin : {largeur_mm:.1f} × {hauteur_mm:.1f} mm")
+
+    # Conversion mm -> pixels
+    px_par_mm = dpi / 25.4
+    largeur_px = int(largeur_mm * px_par_mm)
+    hauteur_px = int(hauteur_mm * px_par_mm)
+    print(f"dimensions de l'image : {largeur_px} × {hauteur_px} px ({dpi} dpi)")
+
+    # def mm_vers_px(x, y):
+    #     """Convertit des coordonnées mm machine en coordonnées pixel image.
+    #     On inverse l'axe Y car en image Y va vers le bas."""
+    #     px = (x - xmin + marge_mm) * px_par_mm
+    #     py = (ymax - y + marge_mm) * px_par_mm
+    #     return (px, py)
+
+    def mm_vers_px(x, y):
+            """Convertit des coordonnées mm machine en coordonnées pixel image.
+            Le G-code conserve la convention SVG (Y vers le bas), donc PIL et
+            le G-code utilisent la même orientation : pas d'inversion Y."""
+            px = (x - xmin + marge_mm) * px_par_mm
+            py = (y - ymin + marge_mm) * px_par_mm
+            return (px, py)
+
+    # --- Deuxième passe : rendu individuel par couleur ---
+    images_par_couleur = {}
+    for couleur, (traces, deplacements) in donnees_par_couleur.items():
+        # Image RGBA avec fond transparent pour permettre la superposition
+        img = Image.new("RGBA", (largeur_px, hauteur_px), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        rgb = couleurs_rgb[couleur]
+        rgba = rgb + (255,)
+
+        # Déplacements à vide (en pointillés gris)
+        if afficher_deplacements:
+            for (x0, y0, x1, y1) in deplacements:
+                p0 = mm_vers_px(x0, y0)
+                p1 = mm_vers_px(x1, y1)
+                _ligne_pointillee(draw, p0, p1, (180, 180, 180, 128))
+
+        # Traits réels
+        for (x0, y0, x1, y1) in traces:
+            p0 = mm_vers_px(x0, y0)
+            p1 = mm_vers_px(x1, y1)
+            draw.line([p0, p1], fill=rgba, width=int(epaisseur_trait))
+
+        # Sauvegarde de l'image isolée pour cette couleur (sur fond blanc)
+        img_finale = Image.new("RGB", (largeur_px, hauteur_px), fond)
+        img_finale.paste(img, (0, 0), img)
+        chemin_out = os.path.join(chemin_sortie, f"{couleur}.png")
+        img_finale.save(chemin_out)
+        print(f"  écrit : {chemin_out}")
+
+        images_par_couleur[couleur] = img
+
+    # --- Troisième passe : composition CMJN ---
+    if images_par_couleur:
+        print("composition de l'image finale...")
+        compose = Image.new("RGB", (largeur_px, hauteur_px), fond)
+
+        # Ordre d'empilement : jaune en bas, magenta, cyan, noir au-dessus
+        # (mimique l'impression CMJN classique)
+        ordre = ["yellow", "magenta", "cyan", "black"]
+        for couleur in ordre:
+            if couleur in images_par_couleur:
+                # Mode "multiply" simulé via composition manuelle
+                _composer_multiply(compose, images_par_couleur[couleur])
+
+        chemin_compose = os.path.join(chemin_sortie, "compose.png")
+        compose.save(chemin_compose)
+        print(f"  écrit : {chemin_compose}")
+
+    print("✅ prévisualisation terminée")
+
+
+def _parser_gcode(chemin_fichier):
+    """
+    Parse un fichier G-code et retourne deux listes :
+      - traces : liste de (x0, y0, x1, y1) pour les mouvements en écriture
+      - deplacements : liste de (x0, y0, x1, y1) pour les mouvements à vide
+
+    Le critère "en écriture" est : Z <= 0 (les déplacements ont Z > 0).
+    """
+    traces = []
+    deplacements = []
+
+    x, y, z = 0.0, 0.0, 0.0
+    seuil_ecriture = 0.0  # Z <= 0 = en train d'écrire
+
+    with open(chemin_fichier, "r") as f:
+        for ligne in f:
+            # Suppression des commentaires
+            if ";" in ligne:
+                ligne = ligne.split(";")[0]
+            ligne = ligne.strip()
+            if not ligne:
+                continue
+
+            # On s'intéresse aux G0 (rapide) et G1 (linéaire)
+            if not (ligne.startswith("G0") or ligne.startswith("G1") or
+                    ligne.startswith("G00") or ligne.startswith("G01")):
+                continue
+
+            # Extraction des nouvelles coordonnées
+            nx, ny, nz = x, y, z
+            tokens = ligne.split()
+            for tok in tokens:
+                if tok.startswith("X"):
+                    try:
+                        nx = float(tok[1:])
+                    except ValueError:
+                        pass
+                elif tok.startswith("Y"):
+                    try:
+                        ny = float(tok[1:])
+                    except ValueError:
+                        pass
+                elif tok.startswith("Z"):
+                    try:
+                        nz = float(tok[1:])
+                    except ValueError:
+                        pass
+
+            # Classification du mouvement
+            deplacement_xy = (nx != x) or (ny != y)
+            if deplacement_xy:
+                # On est "en écriture" si on était ET on reste sous le seuil
+                if z <= seuil_ecriture and nz <= seuil_ecriture:
+                    traces.append((x, y, nx, ny))
+                else:
+                    deplacements.append((x, y, nx, ny))
+
+            x, y, z = nx, ny, nz
+
+    return traces, deplacements
+
+
+def _ligne_pointillee(draw, p0, p1, couleur, longueur_tiret=4, espace=4):
+    """Dessine une ligne pointillée entre p0 et p1."""
+    import math
+    x0, y0 = p0
+    x1, y1 = p1
+    dx, dy = x1 - x0, y1 - y0
+    distance = math.hypot(dx, dy)
+    if distance == 0:
+        return
+    ux, uy = dx / distance, dy / distance
+    pas = longueur_tiret + espace
+    nb_tirets = int(distance / pas)
+    for i in range(nb_tirets + 1):
+        d0 = i * pas
+        d1 = min(d0 + longueur_tiret, distance)
+        a = (x0 + ux * d0, y0 + uy * d0)
+        b = (x0 + ux * d1, y0 + uy * d1)
+        draw.line([a, b], fill=couleur, width=1)
+
+
+def _composer_multiply(image_fond, image_couleur):
+    """
+    Compose image_couleur (RGBA) sur image_fond (RGB) avec un mode 'multiply'
+    approximatif : les couleurs s'assombrissent comme à l'impression CMJN.
+    """
+    import numpy as np
+    fond = np.array(image_fond, dtype=np.float32) / 255.0
+    couleur = np.array(image_couleur, dtype=np.float32) / 255.0
+    alpha = couleur[..., 3:4]
+    rgb_couleur = couleur[..., :3]
+    # Multiply : zones non dessinées (alpha=0) doivent garder le fond
+    # On mélange linéairement : résultat = fond * (1 - alpha + alpha * couleur_rgb)
+    melange = fond * (1 - alpha) + fond * rgb_couleur * alpha
+    melange = np.clip(melange * 255.0, 0, 255).astype(np.uint8)
+    image_fond.paste(Image.fromarray(melange), (0, 0))

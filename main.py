@@ -118,6 +118,8 @@ def executer(arg):
     elif "gcode" in arg:
         img_process.generer_gcode(dossier_sortie, gcode_hauteur_deplacement,
                                   gcode_hauteur_ecriture)
+    elif "previsualiser" in arg:
+        img_process.previsualiser_gcode(dossier_sortie)
 
 
 app = App(title="bitmap2vector2gcode", layout="grid", height=1100, width=1100)
@@ -284,6 +286,18 @@ boutons["reset_gcode"] = PushButton(app, text="paramètres de gcode par défaut"
                                     args=["gcode_"])
 boutons["execute_gcode"] = PushButton(app, text="exécute", grid=[2, 9],
                                       command=executer, args=["gcode_"])
+
+# ---------------------- prévisualisation ----------------------
+boites_titre["previsualiser"] = TitleBox(app, layout="grid",
+                                         text="prévisualisation du résultat",
+                                         grid=[0, 10])
+textes["previsualiser_info"] = Text(boites_titre["previsualiser"],
+                                    text="génère un aperçu PNG du tracé final",
+                                    grid=[0, 0])
+boutons["execute_previsualiser"] = PushButton(app, text="exécute",
+                                              grid=[2, 10],
+                                              command=executer,
+                                              args=["previsualiser_"])
 
 reinitialiser_curseurs("reset_all")
 app.display()

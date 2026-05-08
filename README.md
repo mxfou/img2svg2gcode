@@ -35,9 +35,13 @@ image source
     │
     ▼
 7-gcode     → génération du G-code final (un fichier par couleur)
+    │
+    ▼
+8-preview   → prévisualisation PNG du résultat (une image par couleur
+              + une composition CMJN finale)
 ```
 
-À la sortie : **4 fichiers G-code** (`black.gcode`, `cyan.gcode`, `magenta.gcode`, `yellow.gcode`), un par stylo.
+À la sortie : **4 fichiers G-code** (`black.gcode`, `cyan.gcode`, `magenta.gcode`, `yellow.gcode`), un par stylo, ainsi qu'un **aperçu visuel** du résultat avant tracé.
 
 ---
 
@@ -107,6 +111,8 @@ L'interface graphique s'ouvre avec **un panneau par étape** du pipeline.
    - *exécute tout* lance l'ensemble des 7 étapes d'un coup.
    - Chaque panneau a aussi son propre bouton *exécute* pour ne relancer qu'une étape (utile pour itérer sur un paramètre).
 
+5. **Vérifier la prévisualisation** dans `8-preview/compose.png` avant d'envoyer le G-code à la machine.
+
 ---
 
 ## ⚙️ Description des étapes et paramètres
@@ -167,6 +173,26 @@ Ces fichiers sont utilisés par l'étape 7 pour décider quand lever l'outil.
 
 Le G-code utilise des coordonnées **absolues** en **millimètres**. À la fin du tracé, l'outil remonte à Z=5 et retourne à l'origine (0, 0).
 
+### 8. Prévisualisation
+
+Génère une **image PNG** par couleur ainsi qu'une **composition CMJN finale** simulant le rendu de la machine. Ne nécessite aucun paramètre obligatoire mais accepte plusieurs options de qualité.
+
+| Paramètre | Description | Défaut |
+|---|---|---|
+| `dpi` | résolution de l'image de sortie | 150 |
+| `marge_mm` | marge blanche autour du dessin (mm) | 10 |
+| `epaisseur_trait` | épaisseur des traits dans le rendu (pixels) | 1.0 |
+| `fond` | couleur de fond (`"white"`, `"black"`, hex…) | "white" |
+| `afficher_deplacements` | dessine les déplacements à vide en pointillés gris | False |
+
+Cette étape est implémentée par **lecture directe du G-code** : elle parse les commandes `G0`/`G1` et reconstitue la trajectoire en distinguant les mouvements en écriture (Z ≤ 0) des déplacements à vide (Z > 0).
+
+L'option `afficher_deplacements` est particulièrement utile pour **vérifier visuellement la qualité de l'optimisation** du parcours machine (étape 6) : moins il y a de pointillés, plus l'optimisation est efficace.
+
+#### Convention de coordonnées
+
+La prévisualisation respecte la convention SVG (origine en haut-gauche, Y vers le bas), qui est **la même** que celle utilisée par le pipeline tout au long du traitement. Si votre machine physique attend la convention CNC classique (Y vers le haut), le G-code généré produira un dessin **retourné verticalement** ; dans ce cas, il faut adapter la fonction `generer_gcode()` pour inverser Y, et non pas la fonction de prévisualisation.
+
 ---
 
 ## 🔬 Détails techniques
@@ -200,6 +226,13 @@ Pour chaque couleur :
     cyan.gcode
     magenta.gcode
     yellow.gcode
+
+8-preview/
+    black.png       ← rendu du noir seul
+    cyan.png        ← rendu du cyan seul
+    magenta.png     ← rendu du magenta seul
+    yellow.png      ← rendu du jaune seul
+    compose.png     ← composition CMJN finale (aperçu réaliste)
 ```
 
 ---
@@ -221,6 +254,8 @@ Pour chaque couleur :
 - **Calibrer le Z** soigneusement : la hauteur d'écriture varie selon le stylo. Un test avec un cercle simple est recommandé.
 - **Ordre des couleurs** : tracer dans l'ordre **jaune → magenta → cyan → noir** donne en général le meilleur résultat (les pigments les plus opaques en dernier).
 - **Adapter `longueur min des traits`** : trop bas → plus long, beaucoup de travail machine; trop haut → perte de détails.
+- **Utiliser la prévisualisation** : avant d'envoyer le G-code à la machine, ouvrez `8-preview/compose.png` pour vérifier le rendu et `8-preview/<couleur>.png` pour repérer d'éventuels artefacts couche par couche.
+- **Vérifier l'efficacité de l'optimisation** : lancez la prévisualisation avec `--afficher-deplacements` pour visualiser les trajets à vide ; un dessin bien optimisé doit présenter peu de longues lignes pointillées.
 
 ---
 

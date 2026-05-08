@@ -100,6 +100,7 @@ def executer(arg):
                                    redimensionner_taille_approximation)
         img_process.generer_gcode(dossier_sortie, gcode_hauteur_deplacement,
                                   gcode_hauteur_ecriture)
+        img_process.previsualiser_gcode(dossier_sortie)
     elif "norm" in arg:
         img_process.cmyk_negatif_normalisation(fichier_entree, dossier_sortie,
                                                norm_amplitude, norm_rayon, norm_lissage_moyen)

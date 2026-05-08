@@ -378,13 +378,6 @@ def construire_parser():
     ajouter_args_gcode(p_gc)
     p_gc.set_defaults(func=commande_gcode)
 
-    # ----- Génération de config par défaut -----
-    p_cfg = sub.add_parser("config-defaut",
-                           help="génère un fichier de configuration JSON par défaut")
-    p_cfg.add_argument("--sortie", "-s", required=True,
-                       help="chemin du fichier JSON à créer")
-    p_cfg.set_defaults(func=commande_config_defaut)
-
     p_prev = sub.add_parser("previsualiser",
                             help="étape 8 : génère une image PNG du résultat")
     ajouter_args_communs(p_prev)
@@ -393,10 +386,19 @@ def construire_parser():
     p_prev.add_argument("--marge-mm", type=float, default=10,
                         help="marge en mm autour du dessin (défaut: 10)")
     p_prev.add_argument("--epaisseur-trait", type=float, default=1.0,
-                        help="épaisseur des traits en pixels (défaut: 1.0)")
+                        help="épaisseur des traits en pixels (défaut: 3.0)")
     p_prev.add_argument("--afficher-deplacements", action="store_true",
                         help="dessine les déplacements à vide en pointillés")
     p_prev.set_defaults(func=commande_previsualiser)
+
+    # ----- Génération de config par défaut -----
+    p_cfg = sub.add_parser("config-defaut",
+                           help="génère un fichier de configuration JSON par défaut")
+    p_cfg.add_argument("--sortie", "-s", required=True,
+                       help="chemin du fichier JSON à créer")
+    p_cfg.set_defaults(func=commande_config_defaut)
+
+    
 
     return parser
 

@@ -16,12 +16,51 @@ from gscrib import GCodeBuilder
 
 
 def retourne_taille_image(fichier):
+    """
+    Retourne les dimensions en pixels d'un fichier image.
+
+    Paramètres
+    ----------
+    fichier : str
+        Chemin vers le fichier image (JPG, PNG, BMP, etc.).
+
+    Retour
+    ------
+    (largeur, hauteur) : tuple d'entiers
+        Largeur et hauteur de l'image en pixels.
+    """
     with Image.open(fichier) as img:
         largeur, hauteur = img.size
     return largeur, hauteur
 
 
 def cmyk_negatif_normalisation(fichier_entree, dossier_sortie_global, amplitude, rayon, lissage_moyen):
+    """
+    Étape 1 du pipeline : séparation CMJN, négatif et normalisation locale.
+
+    Convertit l'image source de RGB en CMJN (Cyan, Magenta, Yellow, blacK),
+    sépare les 4 canaux, applique un négatif sur chacun (afin de transformer
+    les zones sombres en zones claires pour les étapes ultérieures de gravure),
+    puis applique le filtre G'MIC `fx_normalize_local` qui équilibre les
+    contrastes localement.
+
+    Le résultat est écrit dans le sous-dossier `1-cmyk` du dossier de sortie,
+    sous forme de 4 images PNG nommées `image_000000.png` à `image_000003.png`
+    (correspondant respectivement à C, M, Y, K).
+
+    Paramètres
+    ----------
+    fichier_entree : str
+        Chemin vers l'image source à traiter.
+    dossier_sortie_global : str
+        Dossier racine où sera créé le sous-dossier `1-cmyk`.
+    amplitude : float
+        Amplitude de la normalisation locale (typiquement 0 à 60).
+    rayon : int
+        Rayon en pixels de la zone de normalisation (typiquement 1 à 64).
+    lissage_moyen : float
+        Lissage de la composante moyenne (typiquement 0 à 60).
+    """
     g = gmic.Gmic()
     g.run("command gmic_stdlib.gmic")
     dossier_sortie = "1-cmyk"
@@ -37,6 +76,27 @@ def cmyk_negatif_normalisation(fichier_entree, dossier_sortie_global, amplitude,
 
 
 def decouper(dossier, nb_images):
+    """
+    Étape 2 du pipeline : découpage de chaque canal en N niveaux d'intensité.
+
+    Pour chaque image présente dans `1-cmyk`, génère plusieurs versions
+    décalées en luminosité (par incréments de 100/nb_images %), puis re-clamp
+    les valeurs dans [0, 255]. Cela revient à produire des "tranches"
+    d'intensité comparables à des courbes de niveau de densité.
+
+    Les fichiers sont aussi renommés à cette étape : les suffixes numériques
+    `000000` à `000003` produits par G'MIC sont remplacés par les noms
+    explicites de couleurs `cyan`, `magenta`, `yellow`, `black`.
+
+    Le résultat est écrit dans le sous-dossier `2-cut`.
+
+    Paramètres
+    ----------
+    dossier : str
+        Dossier racine du projet (contenant déjà `1-cmyk`).
+    nb_images : int
+        Nombre de tranches d'intensité à générer par couleur (typiquement 2 à 10).
+    """
     g = gmic.Gmic()
     g.run("command gmic_stdlib.gmic")
     dossier_entree = "1-cmyk"
@@ -64,6 +124,25 @@ def decouper(dossier, nb_images):
 
 
 def graver(dossier, rayon):
+    """
+    Étape 3 du pipeline : application du filtre "gravure" à chaque image.
+
+    Applique le filtre G'MIC `fx_engrave` à toutes les images du sous-dossier
+    `2-cut`. Ce filtre simule une gravure au burin en transformant les zones
+    sombres en hachures de traits parallèles, dont l'épaisseur dépend du
+    paramètre `rayon`. Les autres paramètres du filtre (50, 0, 18, 40, 5, 0.1,
+    0, 10, 1, 0, 0, 0, 1) sont fixés et correspondent aux valeurs trouvées
+    expérimentalement pour un rendu équilibré.
+
+    Le résultat est écrit dans le sous-dossier `3-engrave`.
+
+    Paramètres
+    ----------
+    dossier : str
+        Dossier racine du projet (contenant déjà `2-cut`).
+    rayon : float
+        Épaisseur des traits de gravure (typiquement 0 à 2).
+    """
     g = gmic.Gmic()
     g.run("command gmic_stdlib.gmic")
     dossier_entree = "2-cut"
@@ -84,6 +163,23 @@ def graver(dossier, rayon):
 
 
 def deformer(dossier):
+    """
+    Étape 4 du pipeline : déformation légère et tramage (dithering noir et blanc).
+
+    Pour chaque image du sous-dossier `3-engrave` :
+    - applique une déformation dont l'amplitude dépend du suffixe numérique
+      du fichier (0, 33, 66) : couches plus claires = plus déformées, ce qui
+      apporte de la variété visuelle entre les tranches d'intensité ;
+    - applique le filtre G'MIC `fx_ditheredbw` qui binarise l'image en
+      utilisant un tramage stylisé.
+
+    Le résultat est écrit dans le sous-dossier `4-deform`.
+
+    Paramètres
+    ----------
+    dossier : str
+        Dossier racine du projet (contenant déjà `3-engrave`).
+    """
     g = gmic.Gmic()
     g.run("command gmic_stdlib.gmic")
     dossier_entree = "3-engrave"
@@ -110,6 +206,23 @@ def deformer(dossier):
 
 
 def vectoriser(dossier):
+    """
+    Étape 5 du pipeline : vectorisation des images binarisées.
+
+    Convertit chaque PNG du sous-dossier `4-deform` en SVG en utilisant
+    AutoTrace en mode `centerline`. Ce mode extrait les **lignes médianes**
+    des traits binarisés (et non leur contour), ce qui est idéal pour un
+    tracé au stylo : un trait épais devient une seule ligne suivant son
+    axe, et non deux lignes le contournant.
+
+    Le résultat est écrit dans le sous-dossier `5-vector`, avec un SVG par
+    PNG d'entrée.
+
+    Paramètres
+    ----------
+    dossier : str
+        Dossier racine du projet (contenant déjà `4-deform`).
+    """
     dossier_entree = "4-deform"
     dossier_sortie = "5-vector"
     chemin_entree = os.path.join(dossier, dossier_entree)
@@ -155,6 +268,52 @@ def _construire_arbre(chemins_propres, disponible):
 
 
 def redimensionner(dossier, facteur_echelle, taille_nettoyage, taille_approximation):
+    """
+    Étape 6 du pipeline : redimensionnement, nettoyage, optimisation et linéarisation.
+
+    C'est l'étape la plus complexe et calculatoire. Pour chacune des quatre
+    couleurs (black, cyan, magenta, yellow), elle effectue les opérations
+    suivantes :
+
+    1. **Lecture et fusion** : tous les SVG correspondant à la couleur
+       (issus des différentes tranches d'intensité de l'étape 5) sont lus
+       et leurs segments concaténés.
+    2. **Nettoyage** : les segments dont la longueur (après mise à l'échelle)
+       est inférieure à `taille_nettoyage` sont supprimés. Cela élimine les
+       artefacts de vectorisation tout en préservant les détails utiles.
+    3. **Optimisation du parcours** : recherche du plus proche voisin
+       (algorithme glouton) pour ordonner les segments de manière à minimiser
+       les déplacements à vide. Utilise un k-d tree (`scipy.spatial.cKDTree`)
+       avec suppression paresseuse et reconstruction périodique pour rester
+       en O(n log n) au lieu de O(n²).
+       Pour chaque segment, les deux extrémités (start et end) sont candidates,
+       et le sens de parcours retenu est celui qui minimise la distance.
+    4. **Linéarisation des courbes de Bézier** : les `CubicBezier` sont
+       approximés par une suite de segments droits dont la longueur cible
+       est `taille_approximation`.
+    5. **Sauvegarde** : un SVG final par couleur est écrit dans `6-resize`,
+       accompagné de trois fichiers JSON :
+       - `.sens` : sens de parcours de chaque segment original ;
+       - `.meme` : True si la fin du segment précédent coïncide avec le début
+         du courant (= continuité parfaite, pas besoin de lever l'outil) ;
+       - `.meme2` : version étendue après linéarisation des Bézier, utilisée
+         par l'étape 7 pour décider quand lever/baisser l'outil.
+
+    Paramètres
+    ----------
+    dossier : str
+        Dossier racine du projet (contenant déjà `5-vector`).
+    facteur_echelle : float
+        Multiplicateur appliqué aux coordonnées : 1.0 conserve la taille
+        en pixels d'origine, des valeurs plus petites/grandes redimensionnent
+        proportionnellement.
+    taille_nettoyage : float
+        Longueur minimale (en mm une fois mis à l'échelle) en-dessous de
+        laquelle un segment est jeté.
+    taille_approximation : float
+        Longueur cible (en mm) des segments droits utilisés pour approximer
+        les courbes de Bézier.
+    """
     facteur_echelle = float(facteur_echelle)
     taille_nettoyage = float(taille_nettoyage)
     taille_approximation = float(taille_approximation)
@@ -335,6 +494,35 @@ def redimensionner(dossier, facteur_echelle, taille_nettoyage, taille_approximat
 
 
 def generer_gcode(dossier, hauteur_deplacement, hauteur_ecriture):
+    """
+    Étape 7 du pipeline : génération du G-code à partir des SVG optimisés.
+
+    Pour chaque SVG du sous-dossier `6-resize`, génère un fichier `.gcode`
+    contenant les instructions machine :
+
+    - **Coordonnées absolues**, unités en **millimètres**, résolution 0.1 mm.
+    - Pour chaque segment :
+      - Si le fichier `.meme2` indique qu'il y a continuité avec le segment
+        précédent (`True`), l'outil reste en position d'écriture et trace
+        directement (`g.move`).
+      - Sinon, l'outil est levé à `hauteur_deplacement` (mouvement rapide
+        vers la nouvelle position de départ), puis abaissé à `hauteur_ecriture`,
+        avant de tracer le segment.
+    - À la fin du fichier, l'outil remonte à Z=5 et retourne à l'origine (0, 0).
+
+    Cette logique exploite directement le travail d'optimisation de l'étape 6
+    (regroupement par couleur, ordre des segments, marqueurs de continuité)
+    pour minimiser le nombre de levages d'outil et réduire le temps machine.
+
+    Paramètres
+    ----------
+    dossier : str
+        Dossier racine du projet (contenant déjà `6-resize`).
+    hauteur_deplacement : float
+        Position Z (mm) lorsque l'outil se déplace à vide (typiquement 1 à 15).
+    hauteur_ecriture : float
+        Position Z (mm) lorsque l'outil trace (typiquement -10 à 0).
+    """
     hauteur_deplacement = float(hauteur_deplacement)
     hauteur_ecriture = float(hauteur_ecriture)
     dossier_entree = "6-resize"
@@ -592,7 +780,26 @@ def _parser_gcode(chemin_fichier):
 
 
 def _ligne_pointillee(draw, p0, p1, couleur, longueur_tiret=4, espace=4):
-    """Dessine une ligne pointillée entre p0 et p1."""
+    """
+    Dessine une ligne pointillée entre p0 et p1 sur un objet ImageDraw.
+
+    Utilisée pour visualiser les déplacements à vide de la machine dans la
+    prévisualisation. Découpe la ligne en tirets de longueur `longueur_tiret`
+    pixels, séparés par des intervalles de `espace` pixels.
+
+    Paramètres
+    ----------
+    draw : PIL.ImageDraw.ImageDraw
+        Contexte de dessin sur lequel tracer.
+    p0, p1 : tuple (x, y)
+        Coordonnées (en pixels) des extrémités de la ligne.
+    couleur : tuple
+        Couleur du trait au format RGB ou RGBA.
+    longueur_tiret : int
+        Longueur de chaque tiret en pixels.
+    espace : int
+        Longueur de l'espace entre deux tirets en pixels.
+    """
     import math
     x0, y0 = p0
     x1, y1 = p1

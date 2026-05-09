@@ -14,6 +14,26 @@ boutons = {}
 
 
 def reinitialiser_curseurs(arg):
+    """
+    Réinitialise un sous-ensemble de curseurs (sliders) à leurs valeurs par défaut.
+
+    La fonction agit comme un filtre :
+    - Si `arg == "reset_all"`, **tous** les curseurs sont réinitialisés.
+    - Sinon, `arg` est utilisé comme préfixe : seuls les curseurs dont la
+      clé contient cette chaîne sont remis à leur valeur par défaut.
+      Par exemple `arg = "norm_"` ne réinitialise que les curseurs de
+      l'étape de normalisation.
+
+    Les valeurs de référence sont lues dans le dictionnaire global
+    `valeurs_defaut_curseurs`, peuplé au moment de la création de l'interface.
+
+    Paramètres
+    ----------
+    arg : str
+        Soit la valeur spéciale `"reset_all"`, soit un préfixe de clé
+        (typiquement `"norm_"`, `"decouper_"`, `"graver_"`, `"redimensionner_"`,
+        `"gcode_"`, etc.).
+    """
     if arg == "reset_all":
         for k in curseurs:
             curseurs[k].value = valeurs_defaut_curseurs[k]
@@ -24,6 +44,25 @@ def reinitialiser_curseurs(arg):
 
 
 def choisir_fichier(arg):
+    """
+    Ouvre une boîte de dialogue pour sélectionner un fichier image et met à jour
+    l'interface en conséquence.
+
+    Le chemin du fichier sélectionné est affiché dans le widget Text identifié
+    par la clé `arg`. Si la sélection concerne le fichier d'entrée principal
+    (`arg == "fichiers_fichier_entree"`), des actions complémentaires sont
+    déclenchées :
+    - lecture des dimensions de l'image via `img_process.retourne_taille_image()` ;
+    - mise à jour des champs `largeur de l'image` et `hauteur de l'image` ;
+    - pré-remplissage des TextBox de taille finale (largeur / hauteur en mm)
+      avec les dimensions en pixels et un facteur d'échelle initial de 1.
+
+    Paramètres
+    ----------
+    arg : str
+        Clé du dictionnaire `textes` du widget cible (typiquement
+        `"fichiers_fichier_entree"`).
+    """
     fichier = app.select_file(filetypes=[["All files", "*.*"],
                                          ["image-jpeg", "*.jpg"],
                                          ["image-png", "*.png"],
@@ -42,12 +81,32 @@ def choisir_fichier(arg):
 
 
 def choisir_dossier(arg):
+    """
+    Ouvre une boîte de dialogue pour sélectionner un dossier et l'affiche
+    dans le widget Text correspondant.
+
+    Paramètres
+    ----------
+    arg : str
+        Clé du dictionnaire `textes` du widget cible (typiquement
+        `"fichiers_dossier_sortie"`).
+    """
     textes[arg].clear()
     dossier = app.select_folder()
     textes[arg].append(dossier)
 
 
 def changement_echelle():
+    """
+    Callback déclenché lorsque l'utilisateur modifie le facteur d'échelle.
+
+    Recalcule la largeur et la hauteur en mm à partir des dimensions en
+    pixels de l'image source et du nouveau facteur d'échelle, puis met à
+    jour les TextBox correspondantes.
+
+    C'est l'une des trois fonctions de synchronisation triplette
+    largeur ⇄ hauteur ⇄ facteur d'échelle.
+    """
     boites_texte["redimensionner_largeur"].value = (
         float(textes["fichiers_largeur_image"].value)
         * float(boites_texte["redimensionner_facteur_echelle"].value)
@@ -59,6 +118,13 @@ def changement_echelle():
 
 
 def changement_largeur():
+    """
+    Callback déclenché lorsque l'utilisateur saisit une nouvelle largeur en mm.
+
+    Recalcule le facteur d'échelle correspondant (largeur cible ÷ largeur
+    en pixels), puis appelle `changement_echelle()` pour mettre à jour la
+    hauteur de manière cohérente (préservation du ratio).
+    """
     boites_texte["redimensionner_facteur_echelle"].value = (
         float(boites_texte["redimensionner_largeur"].value)
         / float(textes["fichiers_largeur_image"].value)
@@ -67,6 +133,13 @@ def changement_largeur():
 
 
 def changement_hauteur():
+    """
+    Callback déclenché lorsque l'utilisateur saisit une nouvelle hauteur en mm.
+
+    Recalcule le facteur d'échelle correspondant (hauteur cible ÷ hauteur
+    en pixels), puis appelle `changement_echelle()` pour mettre à jour la
+    largeur de manière cohérente (préservation du ratio).
+    """
     boites_texte["redimensionner_facteur_echelle"].value = (
         float(boites_texte["redimensionner_hauteur"].value)
         / float(textes["fichiers_hauteur_image"].value)
@@ -75,6 +148,31 @@ def changement_hauteur():
 
 
 def executer(arg):
+    """
+    Exécute une étape du pipeline (ou la totalité) en fonction de l'argument reçu.
+
+    Cette fonction joue le rôle d'aiguilleur principal de l'interface. Elle :
+    1. Récupère les valeurs courantes de tous les curseurs et boîtes de texte
+       pertinents.
+    2. Sélectionne l'étape à lancer en fonction de `arg` :
+       - `"execute_all"` : enchaîne les huit étapes du pipeline
+         (normalisation → découpage → gravure → déformation → vectorisation →
+         redimensionnement → génération du G-code → prévisualisation).
+       - Toute autre valeur est interprétée comme un préfixe d'étape :
+         * `"norm"`           → cmyk_negatif_normalisation
+         * `"decouper"`       → decouper
+         * `"graver"`         → graver
+         * `"deformer"`       → deformer
+         * `"vectoriser"`     → vectoriser
+         * `"redimensionner"` → redimensionner
+         * `"gcode"`          → generer_gcode
+         * `"previsualiser"`  → previsualiser_gcode
+
+    Paramètres
+    ----------
+    arg : str
+        Identifiant de l'étape à exécuter, ou la valeur spéciale `"execute_all"`.
+    """
     fichier_entree = textes["fichiers_fichier_entree"].value
     dossier_sortie = textes["fichiers_dossier_sortie"].value
     norm_amplitude = curseurs["norm_amplitude"].value

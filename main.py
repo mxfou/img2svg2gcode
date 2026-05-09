@@ -3,7 +3,11 @@
 
 
 from guizero import App, Text, PushButton, TitleBox, TextBox, Slider
-import img_process
+
+try:
+    from . import img_process  # contexte package (pdoc)
+except ImportError:
+    import img_process         # exécution directe (uv run)
 
 boites_texte = {}
 boites_titre = {}

@@ -26,7 +26,10 @@ import json
 import os
 import sys
 
-import img_process
+try:
+    from . import img_process  # contexte package (pdoc)
+except ImportError:
+    import img_process         # exécution directe (uv run)
 
 
 # -----------------------------------------------------------------------------

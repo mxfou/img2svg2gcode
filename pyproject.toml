@@ -16,3 +16,8 @@ dependencies = [
     "svgpathtools>=1.7.2",
     "tk>=0.1.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pdoc>=16.0.0",
+]

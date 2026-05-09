@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+# bitmap2vector2gcode
 
-#!/usr/bin/python3
+Pipeline Python qui transforme une image bitmap en G-code multicouches CMJN.
+
+```{include} ../README.md
+```
+"""
 
 from scipy.spatial import cKDTree
 import numpy as np

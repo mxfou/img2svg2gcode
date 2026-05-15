@@ -209,6 +209,34 @@ Le code utilise `scipy.spatial.cKDTree` avec :
 
 Complexité finale : **O(n log n)**.
 
+### Performance du pipeline
+
+Sur une image 1024×768 et 8 cœurs, le pipeline complet tourne en **~1 min 30 s** au lieu de **~24 min** avant optimisation (× 14.7). Deux changements en sont responsables :
+
+**1. Désactivation du type-checking runtime de gscrib.** `gscrib` décore ses méthodes avec `@typeguard.typechecked`, qui ajoute ~1 ms de validation par appel. Sur l'étape 7 (génération G-code) qui appelle `g.move()` plus d'un million de fois, ce coût représentait à lui seul **>80 %** du temps total. La librairie `typeguard` se comporte en no-op dès qu'on remplace son décorateur. Le patch est appliqué une fois dans `img_process.py` avant l'import de `gscrib` :
+
+```python
+import typeguard
+typeguard.typechecked = lambda target=None, **kw: target if target is not None else (lambda f: f)
+from gscrib import GCodeBuilder
+```
+
+**2. Parallélisation par `ProcessPoolExecutor`.** Les étapes 2 à 8 sont parallélisables :
+
+| Étape | Granularité parallèle | Workers |
+|---|---|---|
+| 2, 3, 4 (G'MIC) | 1 tâche par fichier | jusqu'à `cpu_count()` |
+| 5 (AutoTrace) | 1 tâche par fichier | jusqu'à `cpu_count()` |
+| 6 (resize + k-d tree) | 1 tâche par couleur | 4 max |
+| 7 (gcode) | 1 tâche par couleur | 4 max |
+| 8 (preview) | rendu parallèle par couleur, compose séquentiel | 4 max |
+
+Pour les étapes G'MIC, un `initializer=` crée **une seule instance G'MIC + recharge le stdlib** par worker process, qui est ensuite réutilisée pour toutes ses tâches.
+
+### Reproductibilité
+
+Le pipeline n'est **pas** bit-déterministe d'un run à l'autre : la commande G'MIC `deform` (étape 4) utilise un RNG sans seed explicite, et chaque worker démarre avec un seed différent. Les sorties restent fonctionnellement équivalentes (~1 % d'écart dans le nombre de segments par couleur) et le rendu visuel est inchangé. Si un déterminisme bit-à-bit est requis, prefixer la commande de l'étape 4 par `srand <seed_dérivé_du_nom_de_fichier>`.
+
 ### Format des fichiers de sortie
 
 Pour chaque couleur :

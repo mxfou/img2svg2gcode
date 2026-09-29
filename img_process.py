@@ -41,11 +41,17 @@ _gmic_worker = None
 _GMIC_STDLIB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gmic_stdlib.gmic")
 
 
+def _gmic_chemin(chemin):
+    """Entoure un chemin de guillemets pour G'MIC : sans eux, un espace, une
+    virgule, un `$` ou une accolade dans le chemin cassent la commande."""
+    return f'"{chemin}"'
+
+
 def _init_gmic_worker():
     """Initialiseur de ProcessPoolExecutor pour les étapes G'MIC."""
     global _gmic_worker
     _gmic_worker = gmic.Gmic()
-    _gmic_worker.run(f"command {_GMIC_STDLIB_PATH}")
+    _gmic_worker.run(f"command {_gmic_chemin(_GMIC_STDLIB_PATH)}")
 
 
 def _gmic_run_task(args):
@@ -328,14 +334,14 @@ def cmyk_negatif_normalisation(fichier_entree, dossier_sortie_global, amplitude,
         Lissage de la composante moyenne (typiquement 0 à 60).
     """
     g = gmic.Gmic()
-    g.run(f"command {_GMIC_STDLIB_PATH}")
+    g.run(f"command {_gmic_chemin(_GMIC_STDLIB_PATH)}")
     dossier_sortie = "1-cmyk"
     dossier_sortie_complet = os.path.join(dossier_sortie_global, dossier_sortie)
     if not dossier_sortie in os.listdir(dossier_sortie_global):
         os.mkdir(dossier_sortie_complet)
     commande = f"rgb2cmyk split c negate fx_normalize_local {amplitude},{rayon},27.12,{lissage_moyen},1,12"
     fichier_sortie = os.path.join(dossier_sortie_complet, "image.png")
-    cmd = f"input {fichier_entree} {commande} output {fichier_sortie}"
+    cmd = f"input {_gmic_chemin(fichier_entree)} {commande} output {_gmic_chemin(fichier_sortie)}"
     print("séparation des couleurs, négatif, normalisation")
     g.run(cmd)
     del g
@@ -383,7 +389,7 @@ def decouper(dossier, nb_images):
                            .replace("000003", "black")
                            .replace(".png", f"_{decalage}.png"))
             fichier_sortie = os.path.join(chemin_sortie, fich_out)
-            cmd = f"input {fichier_entree} {commande} output {fichier_sortie}"
+            cmd = f"input {_gmic_chemin(fichier_entree)} {commande} output {_gmic_chemin(fichier_sortie)}"
             taches.append((cmd, f"découpé : {fich_out}"))
 
     print(f"découpage de {len(liste_fichiers)} canaux en {nb_images} couches sur {_nb_workers(len(taches))} workers")
@@ -426,7 +432,7 @@ def graver(dossier, rayon):
         commande = f"fx_engrave {rayon},50,0,18,40,5,0.1,0,10,1,0,0,0,1"
         fichier_entree = os.path.join(chemin_entree, fich)
         fichier_sortie = os.path.join(chemin_sortie, fich)
-        cmd = f"input {fichier_entree} {commande} output {fichier_sortie}"
+        cmd = f"input {_gmic_chemin(fichier_entree)} {commande} output {_gmic_chemin(fichier_sortie)}"
         taches.append((cmd, f"gravé : {fich}"))
 
     print(f"gravure de {len(taches)} fichiers sur {_nb_workers(len(taches))} workers")
@@ -473,7 +479,7 @@ def deformer(dossier):
         commande = f"deform {amplitude} fx_ditheredbw -7.8,100,-9.4,0,0,0"
         fichier_entree = os.path.join(chemin_entree, fich)
         fichier_sortie = os.path.join(chemin_sortie, fich)
-        cmd = f"input {fichier_entree} {commande} output {fichier_sortie}"
+        cmd = f"input {_gmic_chemin(fichier_entree)} {commande} output {_gmic_chemin(fichier_sortie)}"
         taches.append((cmd, f"déformé/dithered : {fich}"))
 
     print(f"déformation + dithering de {len(taches)} fichiers sur {_nb_workers(len(taches))} workers")

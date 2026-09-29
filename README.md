@@ -8,7 +8,7 @@ Le résultat est une reproduction artistique de l'image sous forme de **gravure 
 
 ## 🎨 Principe général
 
-L'image source est traitée en **7 étapes successives**, chacune produisant un sous-dossier numéroté dans le dossier de destination :
+L'image source est traitée en **8 étapes successives**, chacune produisant un sous-dossier numéroté dans le dossier de destination :
 
 ```
 image source
@@ -67,12 +67,13 @@ uv sync
 | `pillow` | lecture des images (PIL) |
 | `scipy` | k-d tree (`scipy.spatial.cKDTree`) pour l'optimisation du parcours |
 | `guizero` | interface graphique simple |
-| `tk` | interface graphique |
-| `svgpathtools` | manipulation de fichiers SVG (lecture, écriture, longueurs, segments) |
+| `svgpathtools` | lecture des SVG d'AutoTrace, longueurs et points des courbes de Bézier |
 | `gmic-py` | binding Python de G'MIC pour les filtres image |
 | `autotrace` | binding Python d'AutoTrace pour la vectorisation |
-| `gscrib` | construction de fichiers G-code |
-| `matplotlib` | calcul |
+
+Tkinter, utilisé par `guizero`, est fourni par l'interpréteur Python installé par uv.
+
+Sur Raspberry Pi (aarch64), `pyautotrace` n'a pas de wheel précompilée : `uv sync` le compile depuis les sources (quelques dizaines de secondes).
 
 ---
 
@@ -89,13 +90,19 @@ uv run cli.py --help
 uv run main.py
 ```
 
-L'interface graphique s'ouvre avec **un panneau par étape** du pipeline.
+L'interface graphique s'ouvre avec **un panneau par étape** du pipeline. Le calcul tourne dans un processus séparé : la fenêtre reste utilisable, les boutons *exécute* sont grisés pendant le traitement et une ligne de statut indique l'étape en cours, puis *terminé* ou *échec* (le détail s'affiche dans le terminal).
+
+### Tests
+
+```bash
+uv run pytest
+```
 
 ### Procédure recommandée
 
 1. **Fichiers (E/S)**
    - Cliquer sur *choisir le fichier* pour sélectionner l'image source.
-   - Cliquer sur *choisir le dossier* pour sélectionner le dossier de destination (où seront créés les sous-dossiers `1-cmyk` à `7-gcode`).
+   - Cliquer sur *choisir le dossier* pour sélectionner le dossier de destination (où seront créés les sous-dossiers `1-cmyk` à `8-preview`).
 
 2. **Régler les paramètres** de chaque étape (ou laisser les valeurs par défaut).
    - Le bouton *paramètres … par défaut* d'une étape réinitialise uniquement les curseurs concernés.
@@ -108,7 +115,7 @@ L'interface graphique s'ouvre avec **un panneau par étape** du pipeline.
    - Les trois champs se synchronisent automatiquement.
 
 4. **Exécuter le pipeline** :
-   - *exécute tout* lance l'ensemble des 7 étapes d'un coup.
+   - *exécute tout* lance l'ensemble des 8 étapes d'un coup.
    - Chaque panneau a aussi son propre bouton *exécute* pour ne relancer qu'une étape (utile pour itérer sur un paramètre).
 
 5. **Vérifier la prévisualisation** dans `8-preview/compose.png` avant d'envoyer le G-code à la machine.
@@ -170,6 +177,7 @@ Ces fichiers sont utilisés par l'étape 7 pour décider quand lever l'outil.
 |---|---|---|
 | hauteur de déplacement à vide (mm) | Z lorsque l'outil se déplace sans tracer | 3 |
 | hauteur d'écriture (mm) | Z lorsque l'outil trace | -2 |
+| inverser l'axe Y (`--inverser-y`) | Y vers le haut, origine en bas à gauche (convention CNC) | non |
 
 Le G-code utilise des coordonnées **absolues** en **millimètres**. À la fin du tracé, l'outil remonte à Z=5 et retourne à l'origine (0, 0).
 
@@ -181,7 +189,7 @@ Génère une **image PNG** par couleur ainsi qu'une **composition CMJN finale** 
 |---|---|---|
 | `dpi` | résolution de l'image de sortie | 150 |
 | `marge_mm` | marge blanche autour du dessin (mm) | 10 |
-| `epaisseur_trait` | épaisseur des traits dans le rendu (pixels) | 1.0 |
+| `epaisseur_trait_mm` | largeur du trait du stylo (mm), convertie selon le dpi | 0.5 |
 | `fond` | couleur de fond (`"white"`, `"black"`, hex…) | "white" |
 | `afficher_deplacements` | dessine les déplacements à vide en pointillés gris | False |
 
@@ -191,7 +199,9 @@ L'option `afficher_deplacements` est particulièrement utile pour **vérifier vi
 
 #### Convention de coordonnées
 
-La prévisualisation respecte la convention SVG (origine en haut-gauche, Y vers le bas), qui est **la même** que celle utilisée par le pipeline tout au long du traitement. Si votre machine physique attend la convention CNC classique (Y vers le haut), le G-code généré produira un dessin **retourné verticalement** ; dans ce cas, il faut adapter la fonction `generer_gcode()` pour inverser Y, et non pas la fonction de prévisualisation.
+Par défaut, le G-code garde la convention SVG utilisée tout au long du pipeline (origine en haut à gauche, Y vers le bas). Si votre machine attend la convention CNC classique (Y vers le haut), le dessin sortirait **retourné verticalement** : activez alors l'option d'inversion (`--inverser-y` en ligne de commande, `"gcode_inverser_y": true` dans un fichier de config, ou la case à cocher du panneau G-code). Chaque Y devient `hauteur - Y` et le fichier commence par le commentaire `; axe Y inverse : origine en bas a gauche (convention CNC)`.
+
+La prévisualisation détecte ce commentaire et affiche toujours le dessin à l'endroit.
 
 ---
 
@@ -205,21 +215,28 @@ Le code utilise `scipy.spatial.cKDTree` avec :
 - **indexation des 2n extrémités** (start + end) de chaque segment ;
 - **table de correspondance** pour retrouver à quel segment et à quelle extrémité correspond chaque point ;
 - **suppression paresseuse** d'un segment consommé (tableau `disponible[]`) ;
-- **reconstruction périodique** du k-d tree quand 50 % des segments ont été consommés (pour ne pas accumuler de "fantômes" dans l'arbre).
+- **reconstruction** du k-d tree dès que la moitié des segments encore disponibles a été consommée : l'arbre ne contient jamais plus de 50 % de "fantômes", ce qui borne le nombre de voisins à examiner.
 
 Complexité finale : **O(n log n)**.
 
 ### Performance du pipeline
 
-Sur une image 1024×768 et 8 cœurs, le pipeline complet tourne en **~1 min 30 s** au lieu de **~24 min** avant optimisation (× 14.7). Deux changements en sont responsables :
+Mesures sur Raspberry Pi 5 (4 cœurs, paramètres par défaut), sur les 4 images d'exemple (partie gauche des PNG de `exemples/`) :
 
-**1. Désactivation du type-checking runtime de gscrib.** `gscrib` décore ses méthodes avec `@typeguard.typechecked`, qui ajoute ~1 ms de validation par appel. Sur l'étape 7 (génération G-code) qui appelle `g.move()` plus d'un million de fois, ce coût représentait à lui seul **>80 %** du temps total. La librairie `typeguard` se comporte en no-op dès qu'on remplace son décorateur. Le patch est appliqué une fois dans `img_process.py` avant l'import de `gscrib` :
+| étape | dessin 746×746 | montagne 991×628 | pigeon 1058×792 | pont 991×494 |
+|---|---|---|---|---|
+| 1 à 5 (G'MIC, AutoTrace) | 30.2 s | 31.8 s | 45.0 s | 23.9 s |
+| 6 (resize + k-d tree) | 2.9 s | 4.4 s | 6.3 s | 3.3 s |
+| 7 (gcode) | 1.3 s | 1.6 s | 2.5 s | 1.3 s |
+| 8 (preview) | 6.1 s | 5.6 s | 8.1 s | 5.0 s |
+| **total** | **41 s** | **43 s** | **62 s** | **33 s** |
 
-```python
-import typeguard
-typeguard.typechecked = lambda target=None, **kw: target if target is not None else (lambda f: f)
-from gscrib import GCodeBuilder
-```
+Soit 2,4 à 2,8 fois plus rapide qu'avant les optimisations ci-dessous (99, 114, 171 et 95 s). La gravure G'MIC (étape 3) représente maintenant la moitié du temps : chaque process G'MIC n'utilise qu'un cœur et l'étape est déjà répartie sur tous les cœurs.
+
+**1. Entrées/sorties écrites à la main plutôt que par des bibliothèques génériques.** Le profilage montrait que les étapes 6 et 7 passaient l'essentiel de leur temps à formater et relire des fichiers, pas à calculer :
+- étape 6 : `svgpathtools.wsvg` construisait un DOM de ~230 000 `<path>` puis relisait le fichier avec minidom pour l'indenter (> 90 % du temps de l'étape). `_ecrire_svg_segments()` écrit le même fichier octet pour octet, directement ;
+- étape 7 : relecture du SVG par svgpathtools/minidom (~50 %) et génération par `gscrib` (~50 %, même avec son type-checking désactivé). Le SVG de l'étape 6 est relu par une expression régulière et le G-code est écrit directement, avec exactement le même formatage des nombres que gscrib (même fichier octet pour octet) ;
+- étape 8 : lecture des G-code dans les workers, polylignes plutôt qu'un appel de dessin par segment, composition par `ImageChops.multiply`.
 
 **2. Parallélisation par `ProcessPoolExecutor`.** Les étapes 2 à 8 sont parallélisables :
 
@@ -229,7 +246,7 @@ from gscrib import GCodeBuilder
 | 5 (AutoTrace) | 1 tâche par fichier | jusqu'à `cpu_count()` |
 | 6 (resize + k-d tree) | 1 tâche par couleur | 4 max |
 | 7 (gcode) | 1 tâche par couleur | 4 max |
-| 8 (preview) | rendu parallèle par couleur, compose séquentiel | 4 max |
+| 8 (preview) | lecture puis rendu parallèles par couleur, composition séquentielle | 4 max |
 
 Pour les étapes G'MIC, un `initializer=` crée **une seule instance G'MIC + recharge le stdlib** par worker process, qui est ensuite réutilisée pour toutes ses tâches.
 
@@ -269,9 +286,10 @@ Pour chaque couleur :
 
 ```
 .
-├── img_process.py    ← logique du pipeline (7 fonctions)
+├── img_process.py    ← logique du pipeline (8 étapes)
 ├── main.py           ← interface graphique (guizero)
 ├── cli.py            ← ligne de commande
+├── tests/            ← tests pytest (uv run pytest)
 └── README.md         ← ce fichier
 ```
 
@@ -298,7 +316,6 @@ GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007
 - **G'MIC** : [Traitement d'images](https://gmic-py.readthedocs.io/en/latest/) - <https://gmic.eu> - <https://doi.org/10.21105/joss.06618>
 - **AutoTrace** : [AutoTrace pour Python](https://github.com/lemonyte/pyautotrace)
 - **svgpathtools** : [Outils pour manipuler les objets SVG, courbes de Bézier...](https://github.com/mathandy/svgpathtools)
-- **gscrib** : [génération G-code avec Python](https://gscrib.readthedocs.io/en/latest/)
 - **guizero** : [Interface graphiques faciles et rapides](https://lawsie.github.io/guizero/)
 
 ---

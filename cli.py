@@ -392,25 +392,25 @@ def commande_tout(args):
     print(f"paramètres : {json.dumps(config, indent=2, ensure_ascii=False)}")
     print("=" * 60)
 
-    print("\n[1/7] normalisation CMJN")
+    print("\n[1/8] normalisation CMJN")
     etape_normaliser(args, config)
 
-    print("\n[2/7] découpage par intensité")
+    print("\n[2/8] découpage par intensité")
     etape_decouper(args, config)
 
-    print("\n[3/7] gravure")
+    print("\n[3/8] gravure")
     etape_graver(args, config)
 
-    print("\n[4/7] déformation + dithering")
+    print("\n[4/8] déformation + dithering")
     etape_deformer(args, config)
 
-    print("\n[5/7] vectorisation")
+    print("\n[5/8] vectorisation")
     etape_vectoriser(args, config)
 
-    print("\n[6/7] redimensionnement + nettoyage + optimisation")
+    print("\n[6/8] redimensionnement + nettoyage + optimisation")
     etape_redimensionner(args, config, fichier_entree=args.entree)
 
-    print("\n[7/7] génération G-code")
+    print("\n[7/8] génération G-code")
     etape_gcode(args, config)
 
     print("\n[8/8] prévisualisation")
@@ -694,7 +694,7 @@ def construire_parser():
                                 metavar="COMMANDE")
 
     # ----- Pipeline complet -----
-    p_tout = sub.add_parser("tout", help="exécute le pipeline complet (7 étapes)")
+    p_tout = sub.add_parser("tout", help="exécute le pipeline complet (8 étapes)")
     ajouter_args_communs(p_tout, avec_entree=True)
     ajouter_args_norm(p_tout)
     ajouter_args_decouper(p_tout)

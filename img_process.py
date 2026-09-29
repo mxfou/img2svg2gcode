@@ -283,8 +283,42 @@ def _traiter_couleur_etape6(args):
     print(f"[{couleur}] écriture de {fichier_sortie} ({len(chemin_final)} segments après linéarisation)")
     with open(fichier_sortie.replace(".svg", ".meme2"), 'w') as f:
         json.dump(meme_point_final, f)
-    svgpathtools.wsvg(chemin_final, svg_attributes=attributs_svg, filename=fichier_sortie)
+    _ecrire_svg_segments(fichier_sortie, chemin_final, attributs_svg)
     return couleur
+
+
+def _ecrire_svg_segments(fichier, segments, attributs_svg):
+    """
+    Écrit une liste de segments droits (`svgpathtools.Line`) dans un SVG, à
+    raison d'un `<path>` par segment.
+
+    Produit octet pour octet le même fichier que
+    `svgpathtools.wsvg(segments, svg_attributes=attributs_svg)` (même en-tête,
+    trait de 1/1000 de la plus grande dimension de la boîte englobante,
+    indentation par tabulations), sans passer par svgwrite puis minidom qui
+    représentaient plus de 90 % du temps de l'étape 6.
+    """
+    epaisseur = "1"
+    if segments:
+        xs = [c for seg in segments for c in (seg.start.real, seg.end.real)]
+        ys = [c for seg in segments for c in (seg.start.imag, seg.end.imag)]
+        dx = max(xs) - min(xs)
+        dy = max(ys) - min(ys)
+        epaisseur = str(max(dx or 1, dy or 1) * 1e-3)
+    lignes = ['<?xml version="1.0" ?>\n',
+              '<svg xmlns="http://www.w3.org/2000/svg" '
+              'xmlns:ev="http://www.w3.org/2001/xml-events" '
+              'xmlns:xlink="http://www.w3.org/1999/xlink" baseProfile="full" '
+              f'height="{attributs_svg["height"]}" version="1.1" '
+              f'width="{attributs_svg["width"]}">\n',
+              '\t<defs/>\n']
+    for seg in segments:
+        lignes.append(f'\t<path d="M {seg.start.real},{seg.start.imag} '
+                      f'L {seg.end.real},{seg.end.imag}" fill="none" '
+                      f'stroke="#000000" stroke-width="{epaisseur}"/>\n')
+    lignes.append('</svg>\n')
+    with open(fichier, "w", encoding="utf-8") as f:
+        f.writelines(lignes)
 
 
 def retourne_taille_image(fichier):

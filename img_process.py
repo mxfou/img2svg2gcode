@@ -14,7 +14,7 @@ from scipy.spatial import cKDTree
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import gmic, os, math
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageColor, ImageDraw
 from autotrace import Bitmap
 
 import svgpathtools, json, re
@@ -70,12 +70,33 @@ def _vectoriser_un_fichier(args):
     print(f"vectorisé : {etiquette}")
 
 
+def _analyser_gcode_etape8(chemin_fichier):
+    """Worker étape 8 (1re passe) : lit un G-code et retourne
+    (traces, deplacements, bbox) en coordonnées "Y vers le bas" ; bbox vaut
+    (xmin, ymin, xmax, ymax) des traces, ou None s'il n'y en a aucune."""
+    traces, deplacements, y_inverse = _parser_gcode(chemin_fichier)
+    if y_inverse:
+        # G-code en convention CNC (Y vers le haut) : on repasse en Y vers
+        # le bas pour que l'image soit à l'endroit.
+        traces = [(x0, -y0, x1, -y1) for x0, y0, x1, y1 in traces]
+        deplacements = [(x0, -y0, x1, -y1) for x0, y0, x1, y1 in deplacements]
+    bbox = None
+    if traces:
+        xs = [v for (x0, _, x1, _) in traces for v in (x0, x1)]
+        ys = [v for (_, y0, _, y1) in traces for v in (y0, y1)]
+        bbox = (min(xs), min(ys), max(xs), max(ys))
+    print(f"  {os.path.basename(chemin_fichier)} : {len(traces)} traits, "
+          f"{len(deplacements)} déplacements à vide")
+    return traces, deplacements, bbox
+
+
 def _rendre_couleur_etape8(args):
-    """Worker étape 8 : rend une couleur (RGBA + sauvegarde PNG sur fond),
-    retourne (couleur, image_rgba) pour la composition finale."""
+    """Worker étape 8 (2e passe) : dessine une couleur, sauvegarde son PNG sur
+    le fond demandé et retourne (couleur, facteur) où `facteur` est la couche
+    posée sur du blanc, prête pour la composition en mode "produit"."""
     (couleur, rgb, traces, deplacements,
      largeur_px, hauteur_px, xmin, ymin, marge_mm, px_par_mm,
-     epaisseur_trait, fond, afficher_deplacements, chemin_out) = args
+     epaisseur_px, fond, afficher_deplacements, chemin_out) = args
 
     def mm_vers_px(x, y):
         return ((x - xmin + marge_mm) * px_par_mm,
@@ -90,15 +111,33 @@ def _rendre_couleur_etape8(args):
             _ligne_pointillee(draw, mm_vers_px(x0, y0), mm_vers_px(x1, y1),
                               (180, 180, 180, 128))
 
+    # Les traces qui se suivent sans lever l'outil sont regroupées en une
+    # seule polyligne : un appel à draw.line au lieu d'un par segment, pour
+    # un rendu identique au pixel près.
+    polyligne = []
     for (x0, y0, x1, y1) in traces:
-        draw.line([mm_vers_px(x0, y0), mm_vers_px(x1, y1)],
-                  fill=rgba, width=int(epaisseur_trait))
+        if polyligne and polyligne[-1] == (x0, y0):
+            polyligne.append((x1, y1))
+            continue
+        if polyligne:
+            draw.line([mm_vers_px(x, y) for x, y in polyligne], fill=rgba, width=epaisseur_px)
+        polyligne = [(x0, y0), (x1, y1)]
+    if polyligne:
+        draw.line([mm_vers_px(x, y) for x, y in polyligne], fill=rgba, width=epaisseur_px)
 
     img_finale = Image.new("RGB", (largeur_px, hauteur_px), fond)
     img_finale.paste(img, (0, 0), img)
-    img_finale.save(chemin_out)
+    # compress_level=3 : ~40 % plus rapide que le défaut (6) pour des PNG un
+    # peu plus gros, sans importance pour un aperçu.
+    img_finale.save(chemin_out, compress_level=3)
     print(f"  écrit : {chemin_out}")
-    return couleur, img
+
+    if ImageColor.getrgb(fond)[:3] == (255, 255, 255):
+        facteur = img_finale  # sur fond blanc, c'est déjà la couche sur blanc
+    else:
+        facteur = Image.new("RGB", (largeur_px, hauteur_px), (255, 255, 255))
+        facteur.paste(img, (0, 0), img)
+    return couleur, facteur
 
 
 # Un segment tel qu'écrit par _ecrire_svg_segments() : <path d="M x0,y0 L x1,y1" ...
@@ -775,11 +814,16 @@ def generer_gcode(dossier, hauteur_deplacement, hauteur_ecriture, inverser_y=Fal
             pass
 
 def previsualiser_gcode(dossier, dpi=150, marge_mm=10,
-                        epaisseur_trait=3.0, fond="white",
+                        epaisseur_trait_mm=0.5, fond="white",
                         afficher_deplacements=False):
     """
     Génère une image PNG par fichier G-code + une image composite finale
     superposant les 4 couleurs CMJN.
+
+    Deux passes parallèles (un worker par couleur) : lecture des G-code et
+    calcul de la boîte englobante commune, puis rendu de chaque couleur. La
+    composition multiplie ensuite les couches entre elles, comme des encres
+    superposées.
 
     Paramètres
     ----------
@@ -789,8 +833,9 @@ def previsualiser_gcode(dossier, dpi=150, marge_mm=10,
         Résolution de l'image générée. 150 dpi donne une bonne qualité.
     marge_mm : float
         Marge blanche autour du dessin, en millimètres.
-    epaisseur_trait : float
-        Épaisseur du trait dessiné, en pixels.
+    epaisseur_trait_mm : float
+        Largeur du trait du stylo, en millimètres (convertie en pixels
+        selon le dpi, 1 pixel minimum).
     fond : str
         Couleur de fond ("white", "black", ou code hex).
     afficher_deplacements : bool
@@ -798,8 +843,6 @@ def previsualiser_gcode(dossier, dpi=150, marge_mm=10,
         (utile pour visualiser le parcours machine et l'efficacité de
         l'optimisation k-d tree).
     """
-    
-
     dossier_entree = "7-gcode"
     dossier_sortie = "8-preview"
     chemin_entree = os.path.join(dossier, dossier_entree)
@@ -815,97 +858,67 @@ def previsualiser_gcode(dossier, dpi=150, marge_mm=10,
         "black":   (0, 0, 0),
     }
 
-    # --- Première passe : parser tous les fichiers et calculer la bbox globale ---
-    print("analyse des fichiers G-code...")
-    donnees_par_couleur = {}  # couleur -> liste de (segments_traces, deplacements)
-    bbox = [float("inf"), float("inf"), float("-inf"), float("-inf")]  # xmin, ymin, xmax, ymax
-
-    liste_fichiers = sorted(os.listdir(chemin_entree))
-    for fich in liste_fichiers:
+    couleurs = []
+    for fich in sorted(os.listdir(chemin_entree)):
         if not fich.endswith(".gcode"):
             continue
         couleur = fich.replace(".gcode", "")
         if couleur not in couleurs_rgb:
             print(f"  ⚠️  couleur inconnue ignorée : {fich}")
             continue
-
-        chemin_fichier = os.path.join(chemin_entree, fich)
-        traces, deplacements, y_inverse = _parser_gcode(chemin_fichier)
-        if y_inverse:
-            # G-code en convention CNC (Y vers le haut) : on repasse en Y vers
-            # le bas pour que l'image soit à l'endroit.
-            traces = [(x0, -y0, x1, -y1) for x0, y0, x1, y1 in traces]
-            deplacements = [(x0, -y0, x1, -y1) for x0, y0, x1, y1 in deplacements]
-        donnees_par_couleur[couleur] = (traces, deplacements)
-        print(f"  {fich} : {len(traces)} traits, {len(deplacements)} déplacements à vide")
-
-        # Mise à jour de la bbox
-        for (x0, y0, x1, y1) in traces:
-            bbox[0] = min(bbox[0], x0, x1)
-            bbox[1] = min(bbox[1], y0, y1)
-            bbox[2] = max(bbox[2], x0, x1)
-            bbox[3] = max(bbox[3], y0, y1)
-
-    if bbox[0] == float("inf"):
-        print("⚠️  aucun trait trouvé dans les G-code")
+        couleurs.append(couleur)
+    if not couleurs:
+        print("⚠️  aucun fichier G-code trouvé")
         return
 
-    xmin, ymin, xmax, ymax = bbox
-    largeur_mm = (xmax - xmin) + 2 * marge_mm
-    hauteur_mm = (ymax - ymin) + 2 * marge_mm
-    print(f"dimensions du dessin : {largeur_mm:.1f} × {hauteur_mm:.1f} mm")
+    with ProcessPoolExecutor(max_workers=_nb_workers(len(couleurs))) as pool:
+        # --- Première passe : lecture des G-code et bbox globale ---
+        print(f"analyse de {len(couleurs)} fichiers G-code sur {_nb_workers(len(couleurs))} workers")
+        chemins = [os.path.join(chemin_entree, c + ".gcode") for c in couleurs]
+        donnees_par_couleur = dict(zip(couleurs, pool.map(_analyser_gcode_etape8, chemins)))
 
-    # Conversion mm -> pixels
-    px_par_mm = dpi / 25.4
-    largeur_px = int(largeur_mm * px_par_mm)
-    hauteur_px = int(hauteur_mm * px_par_mm)
-    print(f"dimensions de l'image : {largeur_px} × {hauteur_px} px ({dpi} dpi)")
+        bboxes = [bbox for (_, _, bbox) in donnees_par_couleur.values() if bbox is not None]
+        if not bboxes:
+            print("⚠️  aucun trait trouvé dans les G-code")
+            return
+        xmin = min(b[0] for b in bboxes)
+        ymin = min(b[1] for b in bboxes)
+        xmax = max(b[2] for b in bboxes)
+        ymax = max(b[3] for b in bboxes)
+        largeur_mm = (xmax - xmin) + 2 * marge_mm
+        hauteur_mm = (ymax - ymin) + 2 * marge_mm
+        print(f"dimensions du dessin : {largeur_mm:.1f} × {hauteur_mm:.1f} mm")
 
-    # def mm_vers_px(x, y):
-    #     """Convertit des coordonnées mm machine en coordonnées pixel image.
-    #     On inverse l'axe Y car en image Y va vers le bas."""
-    #     px = (x - xmin + marge_mm) * px_par_mm
-    #     py = (ymax - y + marge_mm) * px_par_mm
-    #     return (px, py)
+        # Conversion mm -> pixels
+        px_par_mm = dpi / 25.4
+        largeur_px = int(largeur_mm * px_par_mm)
+        hauteur_px = int(hauteur_mm * px_par_mm)
+        epaisseur_px = max(1, round(epaisseur_trait_mm * px_par_mm))
+        print(f"dimensions de l'image : {largeur_px} × {hauteur_px} px ({dpi} dpi), "
+              f"trait {epaisseur_trait_mm} mm = {epaisseur_px} px")
 
-    def mm_vers_px(x, y):
-            """Convertit des coordonnées mm machine en coordonnées pixel image.
-            Le G-code conserve la convention SVG (Y vers le bas), donc PIL et
-            le G-code utilisent la même orientation : pas d'inversion Y."""
-            px = (x - xmin + marge_mm) * px_par_mm
-            py = (y - ymin + marge_mm) * px_par_mm
-            return (px, py)
-
-    # --- Deuxième passe : rendu individuel par couleur (en parallèle) ---
-    taches_rendu = []
-    for couleur, (traces, deplacements) in donnees_par_couleur.items():
-        chemin_out = os.path.join(chemin_sortie, f"{couleur}.png")
-        taches_rendu.append((couleur, couleurs_rgb[couleur], traces, deplacements,
-                             largeur_px, hauteur_px, xmin, ymin, marge_mm, px_par_mm,
-                             epaisseur_trait, fond, afficher_deplacements, chemin_out))
-
-    images_par_couleur = {}
-    print(f"rendu de {len(taches_rendu)} couleurs sur {_nb_workers(len(taches_rendu))} workers")
-    with ProcessPoolExecutor(max_workers=_nb_workers(len(taches_rendu))) as pool:
-        for couleur, img_rgba in pool.map(_rendre_couleur_etape8, taches_rendu):
-            images_par_couleur[couleur] = img_rgba
+        # --- Deuxième passe : rendu individuel par couleur ---
+        taches_rendu = []
+        for couleur, (traces, deplacements, _) in donnees_par_couleur.items():
+            chemin_out = os.path.join(chemin_sortie, f"{couleur}.png")
+            taches_rendu.append((couleur, couleurs_rgb[couleur], traces, deplacements,
+                                 largeur_px, hauteur_px, xmin, ymin, marge_mm, px_par_mm,
+                                 epaisseur_px, fond, afficher_deplacements, chemin_out))
+        print(f"rendu de {len(taches_rendu)} couleurs")
+        facteurs = dict(pool.map(_rendre_couleur_etape8, taches_rendu))
 
     # --- Troisième passe : composition CMJN ---
-    if images_par_couleur:
-        print("composition de l'image finale...")
-        compose = Image.new("RGB", (largeur_px, hauteur_px), fond)
+    # Mode "produit" : chaque couche (posée sur du blanc) multiplie l'image,
+    # ce qui assombrit les zones où les encres se superposent.
+    print("composition de l'image finale...")
+    compose = Image.new("RGB", (largeur_px, hauteur_px), fond)
+    for couleur in ["yellow", "magenta", "cyan", "black"]:
+        if couleur in facteurs:
+            compose = ImageChops.multiply(compose, facteurs[couleur])
 
-        # Ordre d'empilement : jaune en bas, magenta, cyan, noir au-dessus
-        # (mimique l'impression CMJN classique)
-        ordre = ["yellow", "magenta", "cyan", "black"]
-        for couleur in ordre:
-            if couleur in images_par_couleur:
-                # Mode "multiply" simulé via composition manuelle
-                _composer_multiply(compose, images_par_couleur[couleur])
-
-        chemin_compose = os.path.join(chemin_sortie, "compose.png")
-        compose.save(chemin_compose)
-        print(f"  écrit : {chemin_compose}")
+    chemin_compose = os.path.join(chemin_sortie, "compose.png")
+    compose.save(chemin_compose, compress_level=3)
+    print(f"  écrit : {chemin_compose}")
 
     print("✅ prévisualisation terminée")
 
@@ -1013,20 +1026,3 @@ def _ligne_pointillee(draw, p0, p1, couleur, longueur_tiret=4, espace=4):
         a = (x0 + ux * d0, y0 + uy * d0)
         b = (x0 + ux * d1, y0 + uy * d1)
         draw.line([a, b], fill=couleur, width=1)
-
-
-def _composer_multiply(image_fond, image_couleur):
-    """
-    Compose image_couleur (RGBA) sur image_fond (RGB) avec un mode 'multiply'
-    approximatif : les couleurs s'assombrissent comme à l'impression CMJN.
-    """
-    import numpy as np
-    fond = np.array(image_fond, dtype=np.float32) / 255.0
-    couleur = np.array(image_couleur, dtype=np.float32) / 255.0
-    alpha = couleur[..., 3:4]
-    rgb_couleur = couleur[..., :3]
-    # Multiply : zones non dessinées (alpha=0) doivent garder le fond
-    # On mélange linéairement : résultat = fond * (1 - alpha + alpha * couleur_rgb)
-    melange = fond * (1 - alpha) + fond * rgb_couleur * alpha
-    melange = np.clip(melange * 255.0, 0, 255).astype(np.uint8)
-    image_fond.paste(Image.fromarray(melange), (0, 0))

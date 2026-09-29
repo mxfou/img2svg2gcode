@@ -545,13 +545,13 @@ def commande_previsualiser(args):
     ----------
     args : argparse.Namespace
         Doit contenir `args.sortie`, `args.dpi`, `args.marge_mm`,
-        `args.epaisseur_trait`, `args.afficher_deplacements`.
+        `args.epaisseur_trait_mm`, `args.afficher_deplacements`.
     """
     img_process.previsualiser_gcode(
         args.sortie,
         dpi=args.dpi,
         marge_mm=args.marge_mm,
-        epaisseur_trait=args.epaisseur_trait,
+        epaisseur_trait_mm=args.epaisseur_trait_mm,
         afficher_deplacements=args.afficher_deplacements,
     )
 
@@ -749,8 +749,8 @@ def construire_parser():
                         help="résolution de l'image (défaut: 150)")
     p_prev.add_argument("--marge-mm", type=float, default=10,
                         help="marge en mm autour du dessin (défaut: 10)")
-    p_prev.add_argument("--epaisseur-trait", type=float, default=1.0,
-                        help="épaisseur des traits en pixels (défaut: 3.0)")
+    p_prev.add_argument("--epaisseur-trait-mm", type=float, default=0.5,
+                        help="largeur du trait du stylo en mm (défaut: 0.5)")
     p_prev.add_argument("--afficher-deplacements", action="store_true",
                         help="dessine les déplacements à vide en pointillés")
     p_prev.set_defaults(func=commande_previsualiser)

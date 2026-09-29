@@ -328,7 +328,7 @@ def cmyk_negatif_normalisation(fichier_entree, dossier_sortie_global, amplitude,
         Lissage de la composante moyenne (typiquement 0 à 60).
     """
     g = gmic.Gmic()
-    g.run("command gmic_stdlib.gmic")
+    g.run(f"command {_GMIC_STDLIB_PATH}")
     dossier_sortie = "1-cmyk"
     dossier_sortie_complet = os.path.join(dossier_sortie_global, dossier_sortie)
     if not dossier_sortie in os.listdir(dossier_sortie_global):

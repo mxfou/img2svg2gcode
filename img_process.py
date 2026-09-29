@@ -18,7 +18,6 @@ from PIL import Image, ImageChops, ImageColor, ImageDraw
 from autotrace import Bitmap
 
 import svgpathtools, json, re
-from pprint import pprint as pp
 
 
 # ---------------------------------------------------------------------------
@@ -1010,7 +1009,6 @@ def _ligne_pointillee(draw, p0, p1, couleur, longueur_tiret=4, espace=4):
     espace : int
         Longueur de l'espace entre deux tirets en pixels.
     """
-    import math
     x0, y0 = p0
     x1, y1 = p1
     dx, dy = x1 - x0, y1 - y0

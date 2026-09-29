@@ -5,7 +5,7 @@
 import multiprocessing
 import os
 
-from guizero import App, Text, PushButton, TitleBox, TextBox, Slider
+from guizero import App, Text, PushButton, TitleBox, TextBox, Slider, CheckBox
 
 try:
     from . import img_process  # contexte package (pdoc)
@@ -196,6 +196,7 @@ def executer(arg):
         "redimensionner_taille_approximation": curseurs["redimensionner_taille_approximation"].value,
         "gcode_hauteur_deplacement": curseurs["gcode_hauteur_deplacement"].value,
         "gcode_hauteur_ecriture": curseurs["gcode_hauteur_ecriture"].value,
+        "gcode_inverser_y": bool(curseurs["gcode_inverser_y"].value),
     }
     if not os.path.isdir(parametres["dossier_sortie"]):
         textes["statut"].value = "⚠️ choisir d'abord le dossier de destination"
@@ -250,7 +251,7 @@ def executer_etapes(arg, p):
                                    p["redimensionner_taille_nettoyage"],
                                    p["redimensionner_taille_approximation"])
         img_process.generer_gcode(dossier_sortie, p["gcode_hauteur_deplacement"],
-                                  p["gcode_hauteur_ecriture"])
+                                  p["gcode_hauteur_ecriture"], p["gcode_inverser_y"])
         img_process.previsualiser_gcode(dossier_sortie)
     elif "norm" in arg:
         img_process.cmyk_negatif_normalisation(p["fichier_entree"], dossier_sortie,
@@ -270,7 +271,7 @@ def executer_etapes(arg, p):
                                    p["redimensionner_taille_approximation"])
     elif "gcode" in arg:
         img_process.generer_gcode(dossier_sortie, p["gcode_hauteur_deplacement"],
-                                  p["gcode_hauteur_ecriture"])
+                                  p["gcode_hauteur_ecriture"], p["gcode_inverser_y"])
     elif "previsualiser" in arg:
         img_process.previsualiser_gcode(dossier_sortie)
 
@@ -464,6 +465,12 @@ def construire_interface():
     curseurs["gcode_hauteur_ecriture"] = Slider(boites_titre["gcode"], start=-10, end=0,
                                                 grid=[1, 1], step=0.1, width=300)
     valeurs_defaut_curseurs["gcode_hauteur_ecriture"] = -2
+    # rangée avec les curseurs pour profiter de la réinitialisation par défaut
+    curseurs["gcode_inverser_y"] = CheckBox(boites_titre["gcode"],
+                                            text="inverser l'axe Y (origine en bas "
+                                                 "à gauche, convention CNC)",
+                                            grid=[0, 2, 2, 1])
+    valeurs_defaut_curseurs["gcode_inverser_y"] = 0
     boutons["reset_gcode"] = PushButton(app, text="paramètres de gcode par défaut",
                                         grid=[1, 9], command=reinitialiser_curseurs,
                                         args=["gcode_"])

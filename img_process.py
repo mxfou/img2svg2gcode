@@ -103,12 +103,21 @@ def _rendre_couleur_etape8(args):
 
 # Un segment tel qu'écrit par _ecrire_svg_segments() : <path d="M x0,y0 L x1,y1" ...
 _MOTIF_SEGMENT_SVG = re.compile(r'<path d="M ([^,"]+),([^ "]+) L ([^,"]+),([^ "]+)"')
+_MOTIF_HAUTEUR_SVG = re.compile(r'<svg\b[^>]*?\sheight="([0-9.eE+-]+)')
+
+# Commentaire ajouté en tête du G-code quand l'axe Y est inversé ; la
+# prévisualisation s'en sert pour remettre le dessin à l'endroit. ASCII
+# uniquement : certains contrôleurs refusent les accents.
+MARQUEUR_Y_INVERSE = "; axe Y inverse : origine en bas a gauche (convention CNC)"
 
 
 def _lire_segments_svg(fichier):
     """
-    Lit les segments droits d'un SVG produit par l'étape 6 et retourne une
-    liste de tuples (x0, y0, x1, y1), dans l'ordre du fichier.
+    Lit les segments droits d'un SVG produit par l'étape 6.
+
+    Retourne `(segments, hauteur)` : la liste des tuples (x0, y0, x1, y1)
+    dans l'ordre du fichier, et la hauteur du dessin (attribut `height` de
+    la balise `<svg>`, en mm).
 
     Le format étant connu (un `<path d="M x0,y0 L x1,y1">` par segment), une
     expression régulière suffit et évite le parseur DOM de svgpathtools, qui
@@ -117,12 +126,15 @@ def _lire_segments_svg(fichier):
     """
     with open(fichier, "r", encoding="utf-8") as f:
         texte = f.read()
+    hauteur = _MOTIF_HAUTEUR_SVG.search(texte)
+    hauteur = float(hauteur.group(1)) if hauteur else None
     segments = [tuple(map(float, m)) for m in _MOTIF_SEGMENT_SVG.findall(texte)]
     if len(segments) == texte.count("<path"):
-        return segments
+        return segments, hauteur
     chemins, _, _ = svgpathtools.svg2paths2(fichier)
-    return [(seg.start.real, seg.start.imag, seg.end.real, seg.end.imag)
-            for chemin in chemins for seg in chemin]
+    segments = [(seg.start.real, seg.start.imag, seg.end.real, seg.end.imag)
+                for chemin in chemins for seg in chemin]
+    return segments, hauteur
 
 
 def _nombre_gcode(x):
@@ -140,14 +152,20 @@ def _nombre_gcode(x):
 
 def _generer_gcode_un_fichier(args):
     """Worker étape 7 : génère un .gcode à partir d'un .svg + son .meme2."""
-    fichier_entree, fichier_sortie, etiquette, hauteur_deplacement, hauteur_ecriture = args
+    (fichier_entree, fichier_sortie, etiquette,
+     hauteur_deplacement, hauteur_ecriture, inverser_y) = args
     with open(fichier_entree.replace(".svg", ".meme2"), 'r') as f:
         meme_point = json.load(f)
     print(f"gcode : {etiquette} → début")
-    segments = _lire_segments_svg(fichier_entree)
+    segments, hauteur = _lire_segments_svg(fichier_entree)
     if len(segments) != len(meme_point):
         raise ValueError(f"{fichier_entree} : {len(segments)} segments mais "
                          f"{len(meme_point)} entrées dans le .meme2")
+    if inverser_y:
+        if hauteur is None:
+            raise ValueError(f"{fichier_entree} : hauteur du SVG introuvable, "
+                             "impossible d'inverser l'axe Y")
+        segments = [(x0, hauteur - y0, x1, hauteur - y1) for x0, y0, x1, y1 in segments]
 
     n = _nombre_gcode
     lever = f"G0 Z{n(hauteur_deplacement)}\n"
@@ -155,6 +173,8 @@ def _generer_gcode_un_fichier(args):
     lignes = ["G92 X0 Y0 Z0 ; Set axis position\n",
               "G21 ; Set length units, millimeters\n",
               "G90 ; Set distance mode, absolute\n"]
+    if inverser_y:
+        lignes.append(MARQUEUR_Y_INVERSE + "\n")
     for continu, (x0, y0, x1, y1) in zip(meme_point, segments):
         if not continu:
             lignes.append(lever)
@@ -694,7 +714,7 @@ def redimensionner(dossier, facteur_echelle, taille_nettoyage, taille_approximat
             pass
 
 
-def generer_gcode(dossier, hauteur_deplacement, hauteur_ecriture):
+def generer_gcode(dossier, hauteur_deplacement, hauteur_ecriture, inverser_y=False):
     """
     Étape 7 du pipeline : génération du G-code à partir des SVG optimisés.
 
@@ -710,6 +730,10 @@ def generer_gcode(dossier, hauteur_deplacement, hauteur_ecriture):
         vers la nouvelle position de départ), puis abaissé à `hauteur_ecriture`,
         avant de tracer le segment.
     - À la fin du fichier, l'outil remonte à Z=5 et retourne à l'origine (0, 0).
+    - Axe Y : par défaut le G-code garde la convention SVG (origine en haut à
+      gauche, Y vers le bas). Avec `inverser_y=True`, Y est remplacé par
+      `hauteur - Y` (origine en bas à gauche, convention CNC) et le fichier
+      commence par le commentaire `MARQUEUR_Y_INVERSE`.
 
     Cette logique exploite directement le travail d'optimisation de l'étape 6
     (regroupement par couleur, ordre des segments, marqueurs de continuité)
@@ -723,6 +747,8 @@ def generer_gcode(dossier, hauteur_deplacement, hauteur_ecriture):
         Position Z (mm) lorsque l'outil se déplace à vide (typiquement 1 à 15).
     hauteur_ecriture : float
         Position Z (mm) lorsque l'outil trace (typiquement -10 à 0).
+    inverser_y : bool
+        Si True, produit un G-code avec Y vers le haut (convention CNC).
     """
     hauteur_deplacement = float(hauteur_deplacement)
     hauteur_ecriture = float(hauteur_ecriture)
@@ -741,7 +767,7 @@ def generer_gcode(dossier, hauteur_deplacement, hauteur_ecriture):
             fich_out = fich.replace(".svg", ".gcode")
             fichier_sortie = os.path.join(chemin_sortie, fich_out)
             taches.append((fichier_entree, fichier_sortie, fich,
-                           hauteur_deplacement, hauteur_ecriture))
+                           hauteur_deplacement, hauteur_ecriture, bool(inverser_y)))
 
     print(f"génération G-code de {len(taches)} fichiers sur {_nb_workers(len(taches))} workers")
     with ProcessPoolExecutor(max_workers=_nb_workers(len(taches))) as pool:
@@ -804,7 +830,12 @@ def previsualiser_gcode(dossier, dpi=150, marge_mm=10,
             continue
 
         chemin_fichier = os.path.join(chemin_entree, fich)
-        traces, deplacements = _parser_gcode(chemin_fichier)
+        traces, deplacements, y_inverse = _parser_gcode(chemin_fichier)
+        if y_inverse:
+            # G-code en convention CNC (Y vers le haut) : on repasse en Y vers
+            # le bas pour que l'image soit à l'endroit.
+            traces = [(x0, -y0, x1, -y1) for x0, y0, x1, y1 in traces]
+            deplacements = [(x0, -y0, x1, -y1) for x0, y0, x1, y1 in deplacements]
         donnees_par_couleur[couleur] = (traces, deplacements)
         print(f"  {fich} : {len(traces)} traits, {len(deplacements)} déplacements à vide")
 
@@ -881,20 +912,24 @@ def previsualiser_gcode(dossier, dpi=150, marge_mm=10,
 
 def _parser_gcode(chemin_fichier):
     """
-    Parse un fichier G-code et retourne deux listes :
+    Parse un fichier G-code et retourne `(traces, deplacements, y_inverse)` :
       - traces : liste de (x0, y0, x1, y1) pour les mouvements en écriture
       - deplacements : liste de (x0, y0, x1, y1) pour les mouvements à vide
+      - y_inverse : True si le fichier contient `MARQUEUR_Y_INVERSE`
 
     Le critère "en écriture" est : Z <= 0 (les déplacements ont Z > 0).
     """
     traces = []
     deplacements = []
+    y_inverse = False
 
     x, y, z = 0.0, 0.0, 0.0
     seuil_ecriture = 0.0  # Z <= 0 = en train d'écrire
 
     with open(chemin_fichier, "r") as f:
         for ligne in f:
+            if ligne.startswith(MARQUEUR_Y_INVERSE):
+                y_inverse = True
             # Suppression des commentaires
             if ";" in ligne:
                 ligne = ligne.split(";")[0]
@@ -938,7 +973,7 @@ def _parser_gcode(chemin_fichier):
 
             x, y, z = nx, ny, nz
 
-    return traces, deplacements
+    return traces, deplacements, y_inverse
 
 
 def _ligne_pointillee(draw, p0, p1, couleur, longueur_tiret=4, espace=4):

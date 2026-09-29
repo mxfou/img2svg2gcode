@@ -46,6 +46,7 @@ DEFAUTS = {
     "redimensionner_taille_approximation": 0.5,
     "gcode_hauteur_deplacement": 3.0,
     "gcode_hauteur_ecriture": -2.0,
+    "gcode_inverser_y": False,
 }
 
 
@@ -125,6 +126,7 @@ def appliquer_overrides(config, args):
         "taille_approximation": "redimensionner_taille_approximation",
         "hauteur_deplacement": "gcode_hauteur_deplacement",
         "hauteur_ecriture": "gcode_hauteur_ecriture",
+        "inverser_y": "gcode_inverser_y",
     }
     for arg_name, config_key in mapping.items():
         valeur = getattr(args, arg_name, None)
@@ -340,13 +342,14 @@ def etape_gcode(args, config):
     args : argparse.Namespace
         Doit contenir `args.sortie`.
     config : dict
-        Doit contenir les clés `gcode_hauteur_deplacement`
-        et `gcode_hauteur_ecriture`.
+        Doit contenir les clés `gcode_hauteur_deplacement`,
+        `gcode_hauteur_ecriture` et `gcode_inverser_y`.
     """
     img_process.generer_gcode(
         args.sortie,
         config["gcode_hauteur_deplacement"],
         config["gcode_hauteur_ecriture"],
+        inverser_y=config["gcode_inverser_y"],
     )
 
 
@@ -646,14 +649,20 @@ def ajouter_args_gcode(parser):
     """
     Ajoute les arguments propres à l'étape de génération du G-code.
 
-    Deux paramètres :
+    Trois paramètres :
     - `--hauteur-deplacement` : Z (mm) lorsque l'outil se déplace à vide ;
-    - `--hauteur-ecriture` : Z (mm) lorsque l'outil trace.
+    - `--hauteur-ecriture` : Z (mm) lorsque l'outil trace ;
+    - `--inverser-y` : Y vers le haut (origine en bas à gauche), pour les
+      machines en convention CNC. `default=None` (et non False) pour que
+      l'absence du drapeau n'écrase pas la valeur du fichier de config.
     """
     parser.add_argument("--hauteur-deplacement", type=float, default=None,
                         help="Z lors des déplacements à vide (mm)")
     parser.add_argument("--hauteur-ecriture", type=float, default=None,
                         help="Z lors de l'écriture (mm)")
+    parser.add_argument("--inverser-y", action="store_true", default=None,
+                        help="Y vers le haut, origine en bas à gauche "
+                             "(convention CNC ; par défaut : convention SVG)")
 
 
 def construire_parser():

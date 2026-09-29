@@ -205,6 +205,9 @@ def _traiter_couleur_etape6(args):
     disponible = np.ones(n, dtype=bool)
     arbre, table_correspondance = _construire_arbre(chemins_propres, disponible)
 
+    # Reconstruction dès que la moitié des segments encore disponibles a été
+    # consommée : l'arbre ne contient jamais plus de 50 % de points déjà
+    # utilisés, ce qui borne la recherche du premier voisin disponible.
     seuil_reconstruction = max(10, n // 2)
     nb_supprimes_depuis_reconstruction = 0
 
@@ -265,6 +268,7 @@ def _traiter_couleur_etape6(args):
         if nb_supprimes_depuis_reconstruction >= seuil_reconstruction:
             arbre, table_correspondance = _construire_arbre(chemins_propres, disponible)
             nb_supprimes_depuis_reconstruction = 0
+            seuil_reconstruction = max(10, (n - k - 1) // 2)
 
     total_chemin_inutile += svgpathtools.Line(dernier, complex(0, 0)).length()
     print(f"[{couleur}] travail : {total_chemin_utile:.0f} / déplacement : {total_chemin_inutile:.0f}")

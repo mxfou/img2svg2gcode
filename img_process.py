@@ -17,17 +17,8 @@ import gmic, os, math
 from PIL import Image, ImageDraw
 from autotrace import Bitmap
 
-import svgpathtools, json
+import svgpathtools, json, re
 from pprint import pprint as pp
-
-# gscrib décore ses méthodes avec @typeguard.typechecked, ce qui ajoute
-# une validation de types à chaque appel. Sur l'étape 7 ce coût domine
-# (>80% du temps total du pipeline sur une image moyenne). On neutralise
-# le décorateur avant l'import de gscrib pour qu'il devienne un no-op.
-import typeguard
-typeguard.typechecked = lambda target=None, **kwargs: target if target is not None else (lambda f: f)
-
-from gscrib import GCodeBuilder
 
 
 # ---------------------------------------------------------------------------
@@ -110,30 +101,70 @@ def _rendre_couleur_etape8(args):
     return couleur, img
 
 
+# Un segment tel qu'écrit par _ecrire_svg_segments() : <path d="M x0,y0 L x1,y1" ...
+_MOTIF_SEGMENT_SVG = re.compile(r'<path d="M ([^,"]+),([^ "]+) L ([^,"]+),([^ "]+)"')
+
+
+def _lire_segments_svg(fichier):
+    """
+    Lit les segments droits d'un SVG produit par l'étape 6 et retourne une
+    liste de tuples (x0, y0, x1, y1), dans l'ordre du fichier.
+
+    Le format étant connu (un `<path d="M x0,y0 L x1,y1">` par segment), une
+    expression régulière suffit et évite le parseur DOM de svgpathtools, qui
+    prenait la moitié du temps de l'étape 7. Si le fichier ne suit pas ce
+    format, on retombe sur svgpathtools (début et fin de chaque segment).
+    """
+    with open(fichier, "r", encoding="utf-8") as f:
+        texte = f.read()
+    segments = [tuple(map(float, m)) for m in _MOTIF_SEGMENT_SVG.findall(texte)]
+    if len(segments) == texte.count("<path"):
+        return segments
+    chemins, _, _ = svgpathtools.svg2paths2(fichier)
+    return [(seg.start.real, seg.start.imag, seg.end.real, seg.end.imag)
+            for chemin in chemins for seg in chemin]
+
+
+def _nombre_gcode(x):
+    """
+    Formate une coordonnée G-code : 5 décimales au plus, zéros finaux et
+    point retirés ("3", "-2", "16.00061").
+
+    Reproduit exactement le formatage de gscrib, utilisé auparavant (y compris
+    "-0" pour un négatif qui s'arrondit à zéro).
+    """
+    if x == 0:
+        return "0"
+    return f"{x:.5f}".rstrip("0").rstrip(".")
+
+
 def _generer_gcode_un_fichier(args):
     """Worker étape 7 : génère un .gcode à partir d'un .svg + son .meme2."""
     fichier_entree, fichier_sortie, etiquette, hauteur_deplacement, hauteur_ecriture = args
     with open(fichier_entree.replace(".svg", ".meme2"), 'r') as f:
         meme_point = json.load(f)
     print(f"gcode : {etiquette} → début")
-    g = GCodeBuilder(output=fichier_sortie)
-    g.set_axis(x=0, y=0, z=0)
-    g.set_length_units("millimeters")
-    g.set_distance_mode("absolute")
-    g.set_resolution(0.1)
-    chemins, attributs, attributs_svg = svgpathtools.svg2paths2(fichier_entree)
-    cpt = 0
-    for chemin in chemins:
-        for seg in chemin:
-            if not meme_point[cpt]:
-                g.rapid(z=hauteur_deplacement)
-                g.rapid(x=seg.start.real, y=seg.start.imag)
-                g.rapid(z=hauteur_ecriture)
-            g.move(x=seg.end.real, y=seg.end.imag)
-            cpt += 1
-    g.rapid(z=5)
-    g.rapid(x=0, y=0)
-    g.teardown()
+    segments = _lire_segments_svg(fichier_entree)
+    if len(segments) != len(meme_point):
+        raise ValueError(f"{fichier_entree} : {len(segments)} segments mais "
+                         f"{len(meme_point)} entrées dans le .meme2")
+
+    n = _nombre_gcode
+    lever = f"G0 Z{n(hauteur_deplacement)}\n"
+    baisser = f"G0 Z{n(hauteur_ecriture)}\n"
+    lignes = ["G92 X0 Y0 Z0 ; Set axis position\n",
+              "G21 ; Set length units, millimeters\n",
+              "G90 ; Set distance mode, absolute\n"]
+    for continu, (x0, y0, x1, y1) in zip(meme_point, segments):
+        if not continu:
+            lignes.append(lever)
+            lignes.append(f"G0 X{n(x0)} Y{n(y0)}\n")
+            lignes.append(baisser)
+        lignes.append(f"G1 X{n(x1)} Y{n(y1)}\n")
+    lignes.append("G0 Z5\n")
+    lignes.append("G0 X0 Y0\n")
+    with open(fichier_sortie, "w", encoding="utf-8") as f:
+        f.writelines(lignes)
     print(f"gcode : {etiquette} → terminé")
     return etiquette
 

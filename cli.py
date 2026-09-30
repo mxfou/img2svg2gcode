@@ -47,6 +47,10 @@ DEFAUTS = {
     "gcode_hauteur_deplacement": 3.0,
     "gcode_hauteur_ecriture": -2.0,
     "gcode_inverser_y": False,
+    "previsualiser_dpi": 150,
+    "previsualiser_marge_mm": 10.0,
+    "previsualiser_epaisseur_trait_mm": 0.5,
+    "previsualiser_afficher_deplacements": False,
 }
 
 
@@ -127,6 +131,10 @@ def appliquer_overrides(config, args):
         "hauteur_deplacement": "gcode_hauteur_deplacement",
         "hauteur_ecriture": "gcode_hauteur_ecriture",
         "inverser_y": "gcode_inverser_y",
+        "dpi": "previsualiser_dpi",
+        "marge_mm": "previsualiser_marge_mm",
+        "epaisseur_trait_mm": "previsualiser_epaisseur_trait_mm",
+        "afficher_deplacements": "previsualiser_afficher_deplacements",
     }
     for arg_name, config_key in mapping.items():
         valeur = getattr(args, arg_name, None)
@@ -353,6 +361,29 @@ def etape_gcode(args, config):
     )
 
 
+def etape_previsualiser(args, config):
+    """
+    Lance l'étape 8 du pipeline : prévisualisation PNG du G-code.
+
+    Wrapper minimal autour de `img_process.previsualiser_gcode()`.
+
+    Paramètres
+    ----------
+    args : argparse.Namespace
+        Doit contenir `args.sortie`.
+    config : dict
+        Doit contenir les clés `previsualiser_dpi`, `previsualiser_marge_mm`,
+        `previsualiser_epaisseur_trait_mm` et `previsualiser_afficher_deplacements`.
+    """
+    img_process.previsualiser_gcode(
+        args.sortie,
+        dpi=config["previsualiser_dpi"],
+        marge_mm=config["previsualiser_marge_mm"],
+        epaisseur_trait_mm=config["previsualiser_epaisseur_trait_mm"],
+        afficher_deplacements=config["previsualiser_afficher_deplacements"],
+    )
+
+
 # -----------------------------------------------------------------------------
 # Pipeline complet
 # -----------------------------------------------------------------------------
@@ -414,7 +445,7 @@ def commande_tout(args):
     etape_gcode(args, config)
 
     print("\n[8/8] prévisualisation")
-    img_process.previsualiser_gcode(args.sortie)
+    etape_previsualiser(args, config)
 
     print("\n✅ pipeline terminé avec succès")
     print(f"   fichiers G-code disponibles dans : {os.path.join(args.sortie, '7-gcode')}")
@@ -541,19 +572,11 @@ def commande_previsualiser(args):
     modifié manuellement un fichier G-code et souhaite vérifier le rendu
     sans relancer tout le pipeline.
 
-    Paramètres
-    ----------
-    args : argparse.Namespace
-        Doit contenir `args.sortie`, `args.dpi`, `args.marge_mm`,
-        `args.epaisseur_trait_mm`, `args.afficher_deplacements`.
+    Charge la configuration (avec surcharges CLI) puis appelle
+    `etape_previsualiser()`.
     """
-    img_process.previsualiser_gcode(
-        args.sortie,
-        dpi=args.dpi,
-        marge_mm=args.marge_mm,
-        epaisseur_trait_mm=args.epaisseur_trait_mm,
-        afficher_deplacements=args.afficher_deplacements,
-    )
+    config = appliquer_overrides(charger_config(args.config), args)
+    etape_previsualiser(args, config)
 
 # -----------------------------------------------------------------------------
 # Construction du parser
@@ -665,6 +688,23 @@ def ajouter_args_gcode(parser):
                              "(convention CNC ; par défaut : convention SVG)")
 
 
+def ajouter_args_previsualiser(parser):
+    """
+    Ajoute les arguments propres à l'étape de prévisualisation.
+
+    Valeurs par défaut à None : l'absence d'un argument laisse la valeur du
+    fichier de config (ou de `DEFAUTS`).
+    """
+    parser.add_argument("--dpi", type=int, default=None,
+                        help="résolution de l'aperçu (défaut: 150)")
+    parser.add_argument("--marge-mm", type=float, default=None,
+                        help="marge en mm autour du dessin (défaut: 10)")
+    parser.add_argument("--epaisseur-trait-mm", type=float, default=None,
+                        help="largeur du trait du stylo en mm (défaut: 0.5)")
+    parser.add_argument("--afficher-deplacements", action="store_true", default=None,
+                        help="dessine les déplacements à vide en pointillés")
+
+
 def construire_parser():
     """
     Construit et retourne l'`ArgumentParser` complet de l'application CLI.
@@ -701,6 +741,7 @@ def construire_parser():
     ajouter_args_graver(p_tout)
     ajouter_args_redimensionner(p_tout)
     ajouter_args_gcode(p_tout)
+    ajouter_args_previsualiser(p_tout)
     p_tout.set_defaults(func=commande_tout)
 
     # ----- Étapes individuelles -----
@@ -745,14 +786,7 @@ def construire_parser():
     p_prev = sub.add_parser("previsualiser",
                             help="étape 8 : génère une image PNG du résultat")
     ajouter_args_communs(p_prev)
-    p_prev.add_argument("--dpi", type=int, default=150,
-                        help="résolution de l'image (défaut: 150)")
-    p_prev.add_argument("--marge-mm", type=float, default=10,
-                        help="marge en mm autour du dessin (défaut: 10)")
-    p_prev.add_argument("--epaisseur-trait-mm", type=float, default=0.5,
-                        help="largeur du trait du stylo en mm (défaut: 0.5)")
-    p_prev.add_argument("--afficher-deplacements", action="store_true",
-                        help="dessine les déplacements à vide en pointillés")
+    ajouter_args_previsualiser(p_prev)
     p_prev.set_defaults(func=commande_previsualiser)
 
     # ----- Génération de config par défaut -----

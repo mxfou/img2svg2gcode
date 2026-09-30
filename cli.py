@@ -812,6 +812,10 @@ def main():
     délègue l'exécution à la fonction associée à la sous-commande choisie
     (renseignée via `set_defaults(func=...)` lors de la construction).
     """
+    # Sortie vidée à chaque ligne, même redirigée vers un fichier (journal de
+    # l'interface web) : chaque ligne part en une seule écriture, y compris
+    # depuis les workers du pipeline, sans se mélanger avec les autres.
+    sys.stdout.reconfigure(line_buffering=True)
     parser = construire_parser()
     args = parser.parse_args()
     args.func(args)

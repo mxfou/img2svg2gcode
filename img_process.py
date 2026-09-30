@@ -52,6 +52,24 @@ def _gmic_run_task(args):
         print(label)
 
 
+def _preparer_dossier_sortie(chemin):
+    """
+    Crée le dossier de sortie d'une étape, ou le vide s'il existe déjà.
+
+    Sans cela, relancer une étape avec d'autres paramètres (par exemple 3
+    couches au lieu de 5 au découpage) laissait les fichiers de l'exécution
+    précédente à côté des nouveaux, et les étapes suivantes traitaient les
+    deux.
+    """
+    if os.path.isdir(chemin):
+        for nom in os.listdir(chemin):
+            fichier = os.path.join(chemin, nom)
+            if os.path.isfile(fichier) or os.path.islink(fichier):
+                os.remove(fichier)
+    else:
+        os.mkdir(chemin)
+
+
 def _nb_workers(n_taches):
     """Nombre de workers : limité au nombre de tâches et au nombre de CPU."""
     cpu = os.cpu_count() or 1
@@ -464,8 +482,7 @@ def cmyk_negatif_normalisation(fichier_entree, dossier_sortie_global, amplitude,
     g.run(f"command {_gmic_chemin(_GMIC_STDLIB_PATH)}")
     dossier_sortie = "1-cmyk"
     dossier_sortie_complet = os.path.join(dossier_sortie_global, dossier_sortie)
-    if not dossier_sortie in os.listdir(dossier_sortie_global):
-        os.mkdir(dossier_sortie_complet)
+    _preparer_dossier_sortie(dossier_sortie_complet)
     commande = f"rgb2cmyk split c negate fx_normalize_local {amplitude},{rayon},27.12,{lissage_moyen},1,12"
     fichier_sortie = os.path.join(dossier_sortie_complet, "image.png")
     cmd = f"input {_gmic_chemin(fichier_entree)} {commande} output {_gmic_chemin(fichier_sortie)}"
@@ -500,8 +517,7 @@ def decouper(dossier, nb_images):
     dossier_sortie = "2-cut"
     chemin_entree = os.path.join(dossier, dossier_entree)
     chemin_sortie = os.path.join(dossier, dossier_sortie)
-    if not dossier_sortie in os.listdir(dossier):
-        os.mkdir(chemin_sortie)
+    _preparer_dossier_sortie(chemin_sortie)
     liste_fichiers = sorted(os.listdir(chemin_entree))
     liste_decalage = list(range(0, 100, math.ceil(100 / nb_images)))
 
@@ -550,8 +566,7 @@ def graver(dossier, rayon):
     dossier_sortie = "3-engrave"
     chemin_entree = os.path.join(dossier, dossier_entree)
     chemin_sortie = os.path.join(dossier, dossier_sortie)
-    if not dossier_sortie in os.listdir(dossier):
-        os.mkdir(chemin_sortie)
+    _preparer_dossier_sortie(chemin_sortie)
     liste_fichiers = sorted(os.listdir(chemin_entree))
 
     taches = []
@@ -591,8 +606,7 @@ def deformer(dossier):
     dossier_sortie = "4-deform"
     chemin_entree = os.path.join(dossier, dossier_entree)
     chemin_sortie = os.path.join(dossier, dossier_sortie)
-    if not dossier_sortie in os.listdir(dossier):
-        os.mkdir(chemin_sortie)
+    _preparer_dossier_sortie(chemin_sortie)
     liste_fichiers = sorted(os.listdir(chemin_entree))
 
     taches = []
@@ -638,8 +652,7 @@ def vectoriser(dossier):
     dossier_sortie = "5-vector"
     chemin_entree = os.path.join(dossier, dossier_entree)
     chemin_sortie = os.path.join(dossier, dossier_sortie)
-    if not dossier_sortie in os.listdir(dossier):
-        os.mkdir(chemin_sortie)
+    _preparer_dossier_sortie(chemin_sortie)
     liste_fichiers = sorted(os.listdir(chemin_entree))
 
     taches = []
@@ -734,8 +747,7 @@ def redimensionner(dossier, facteur_echelle, taille_nettoyage, taille_approximat
     dossier_sortie = "6-resize"
     chemin_entree = os.path.join(dossier, dossier_entree)
     chemin_sortie = os.path.join(dossier, dossier_sortie)
-    if not dossier_sortie in os.listdir(dossier):
-        os.mkdir(chemin_sortie)
+    _preparer_dossier_sortie(chemin_sortie)
     liste_fichiers = sorted(os.listdir(chemin_entree))
 
     # Une tâche par couleur : on ne passe au worker que la liste des SVGs
@@ -794,8 +806,7 @@ def generer_gcode(dossier, hauteur_deplacement, hauteur_ecriture, inverser_y=Fal
     dossier_sortie = "7-gcode"
     chemin_entree = os.path.join(dossier, dossier_entree)
     chemin_sortie = os.path.join(dossier, dossier_sortie)
-    if not dossier_sortie in os.listdir(dossier):
-        os.mkdir(chemin_sortie)
+    _preparer_dossier_sortie(chemin_sortie)
     liste_fichiers = sorted(os.listdir(chemin_entree))
 
     taches = []
@@ -846,8 +857,7 @@ def previsualiser_gcode(dossier, dpi=150, marge_mm=10,
     dossier_sortie = "8-preview"
     chemin_entree = os.path.join(dossier, dossier_entree)
     chemin_sortie = os.path.join(dossier, dossier_sortie)
-    if not dossier_sortie in os.listdir(dossier):
-        os.mkdir(chemin_sortie)
+    _preparer_dossier_sortie(chemin_sortie)
 
     # Couleurs CMJN au format RGB pour le rendu
     couleurs_rgb = {

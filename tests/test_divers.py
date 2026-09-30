@@ -58,3 +58,13 @@ def test_import_gui_sans_fenetre():
     ne doit pas construire l'interface."""
     ns = runpy.run_path(os.path.join(RACINE, "main.py"), run_name="__mp_main__")
     assert ns["app"] is None
+
+
+def test_relancer_une_etape_ne_laisse_pas_d_anciens_fichiers(tmp_path):
+    """Découper en 5 puis en 3 couches : seules les 3 nouvelles restent."""
+    (tmp_path / "1-cmyk").mkdir()
+    Image.fromarray(np.full((8, 8), 100, dtype=np.uint8)).save(tmp_path / "1-cmyk" / "image_000000.png")
+    ip.decouper(str(tmp_path), 5)
+    assert len(os.listdir(tmp_path / "2-cut")) == 5
+    ip.decouper(str(tmp_path), 3)
+    assert sorted(os.listdir(tmp_path / "2-cut")) == ["image_cyan_0.png", "image_cyan_34.png", "image_cyan_68.png"]

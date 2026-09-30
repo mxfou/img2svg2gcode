@@ -102,11 +102,13 @@ uv run web.py --port 9000 --dossier-travaux ~/travaux
 
 Même couverture que l'interface graphique, depuis un navigateur (ordinateur ou téléphone) :
 
-- envoi d'une image par glisser-déposer ou sélection ;
+- envoi d'une image par glisser-déposer ou sélection, avec réduction optionnelle des grandes images (côté le plus long à 1000, 1500, 2000 ou 3000 px, 2000 par défaut) ;
 - tous les paramètres, étape par étape, avec la taille du dessin (largeur, hauteur et facteur synchronisés) et les options de l'aperçu ;
 - pipeline complet ou une seule étape, avec le journal et la progression en direct, et un bouton pour annuler ;
 - aperçu CMJN, images intermédiaires de chaque étape, téléchargement du G-code en zip ;
 - historique des travaux.
+
+**Pourquoi réduire ?** Les étapes 1 à 5 travaillent pixel par pixel : sur le Raspberry Pi 5, une photo de téléphone de 12,5 Mpx (3072 × 4080) a pris 19 minutes, dont 15 pour la gravure, contre moins de 2 minutes pour une image de 1 Mpx. Mais la réduction change aussi le rendu : l'espacement des hachures de la gravure est fixé en pixels, donc à taille de dessin égale (en mm), une image plus petite donne des traits plus espacés.
 
 Chaque image envoyée crée un *travail* : un dossier dans `travaux/` (ignoré par git) qui contient l'image, les paramètres (`parametres.json`), le journal et les sous-dossiers `1-cmyk` à `8-preview`. Les calculs passent par une file d'attente et s'exécutent un par un, chacun dans un processus qui lance `cli.py`.
 

@@ -91,7 +91,9 @@ for _p in PARAMETRES:
     _p["defaut"] = cli.DEFAUTS[_p["cle"]]
 
 TAILLE_MAX_ENVOI = 40 * 1024 * 1024  # octets
-PIXELS_MAX = 25_000_000              # ~5000 × 5000 : au-delà, des heures de calcul
+PIXELS_MAX = 25_000_000              # image de travail (~5000 × 5000) : au-delà, des heures de calcul
+PIXELS_MAX_ORIGINAL = 100_000_000    # image envoyée, avant réduction (mémoire)
+COTE_MAX_BORNES = (100, 10_000)      # bornes de l'option de réduction à l'envoi (px)
 TAILLE_MINIATURE_MAX = 2000          # px
 
 MOTIF_ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")
@@ -187,15 +189,20 @@ class Travaux:
         return resumes
 
     # --- création ----------------------------------------------------------
-    def creer(self, fichier_recu, nom_original):
+    def creer(self, fichier_recu, nom_original, cote_max=None):
         """Valide l'image reçue, la normalise en PNG RGB et crée le travail.
-        Appelée dans un thread (PIL est bloquant)."""
+
+        Si `cote_max` est donné, l'image est réduite (jamais agrandie) pour
+        que son plus grand côté mesure au plus `cote_max` pixels : les étapes
+        1 à 5 travaillent pixel par pixel, une photo de téléphone de 12 Mpx
+        prend sinon une vingtaine de minutes. Appelée dans un thread (PIL est
+        bloquant)."""
         try:
             with Image.open(fichier_recu) as img:
                 largeur, hauteur = img.size
-                if largeur * hauteur > PIXELS_MAX:
+                if largeur * hauteur > PIXELS_MAX_ORIGINAL:
                     raise HTTPException(413, f"image trop grande ({largeur}×{hauteur} px, "
-                                             f"maximum {PIXELS_MAX // 1_000_000} Mpx)")
+                                             f"maximum {PIXELS_MAX_ORIGINAL // 1_000_000} Mpx)")
                 img.load()
                 img = ImageOps.exif_transpose(img)  # photos de téléphone
                 if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
@@ -206,9 +213,18 @@ class Travaux:
         except HTTPException:
             raise
         except Image.DecompressionBombError:
-            raise HTTPException(413, f"image trop grande (maximum {PIXELS_MAX // 1_000_000} Mpx)")
+            raise HTTPException(413, f"image trop grande (maximum {PIXELS_MAX_ORIGINAL // 1_000_000} Mpx)")
         except Exception:
             raise HTTPException(400, "fichier illisible : ce n'est pas une image reconnue")
+
+        taille_origine = img.size  # après redressement EXIF
+        if cote_max and max(img.size) > cote_max:
+            rapport = cote_max / max(img.size)
+            nouvelle = (max(1, round(img.width * rapport)), max(1, round(img.height * rapport)))
+            img = img.resize(nouvelle, Image.LANCZOS)
+        if img.width * img.height > PIXELS_MAX:
+            raise HTTPException(413, f"image trop grande ({img.width}×{img.height} px, maximum "
+                                     f"{PIXELS_MAX // 1_000_000} Mpx) : choisir une réduction à l'envoi")
 
         id_travail = f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
         dossier = self.dossier / id_travail
@@ -220,6 +236,7 @@ class Travaux:
             "nom": nom_original,
             "largeur_px": img.width,
             "hauteur_px": img.height,
+            "taille_origine": list(taille_origine),
             "cree": _maintenant(),
             "parametres": parametres,
             "execution": None,
@@ -385,7 +402,8 @@ async def route_parametres(request):
     return JSONResponse({
         "parametres": PARAMETRES,
         "etapes": [{"commande": c, "dossier": d, "libelle": l} for c, d, l in ETAPES],
-        "limites": {"taille_max_envoi": TAILLE_MAX_ENVOI, "pixels_max": PIXELS_MAX},
+        "limites": {"taille_max_envoi": TAILLE_MAX_ENVOI, "pixels_max": PIXELS_MAX,
+                    "pixels_max_original": PIXELS_MAX_ORIGINAL, "cote_max": COTE_MAX_BORNES},
     })
 
 
@@ -396,8 +414,17 @@ async def route_liste(request):
 
 async def route_creer(request):
     """Reçoit l'image brute dans le corps de la requête (pas de multipart) ;
-    le nom d'origine est dans l'en-tête X-Nom-Fichier (encodé URL)."""
+    le nom d'origine est dans l'en-tête X-Nom-Fichier (encodé URL). Option
+    ?cote_max=N : réduire l'image pour que son plus grand côté fasse au plus
+    N pixels (0 ou absent : pas de réduction)."""
     travaux = request.app.state.travaux
+    try:
+        cote_max = int(request.query_params.get("cote_max", "0"))
+    except ValueError:
+        raise HTTPException(400, "cote_max : entier attendu")
+    if cote_max and not COTE_MAX_BORNES[0] <= cote_max <= COTE_MAX_BORNES[1]:
+        raise HTTPException(400, f"cote_max : doit être entre {COTE_MAX_BORNES[0]} et {COTE_MAX_BORNES[1]} "
+                                 "(ou 0 pour ne pas réduire)")
     travaux.dossier.mkdir(parents=True, exist_ok=True)
     nom = urllib.parse.unquote(request.headers.get("x-nom-fichier", "image"))
     nom = os.path.basename(nom)[:120] or "image"
@@ -408,7 +435,7 @@ async def route_creer(request):
                 f.write(morceau)
         if temporaire.stat().st_size == 0:
             raise HTTPException(400, "fichier vide")
-        id_travail = await run_in_threadpool(travaux.creer, temporaire, nom)
+        id_travail = await run_in_threadpool(travaux.creer, temporaire, nom, cote_max or None)
     finally:
         temporaire.unlink(missing_ok=True)
     return JSONResponse(await run_in_threadpool(travaux.infos, id_travail), status_code=201)

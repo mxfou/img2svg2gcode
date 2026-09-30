@@ -10,6 +10,8 @@ const LIBELLES_ETAT = {
 const ETATS_ACTIFS = new Set(["en_attente", "en_cours"]);
 const NOMS_COULEURS = { cyan: "cyan", magenta: "magenta", yellow: "jaune", black: "noir" };
 const CANAUX_1_CMYK = ["cyan", "magenta", "yellow", "black"]; // image_000000 … 000003
+const CLE_COTE_MAX = "img2svg2gcode.cote_max";   // choix de réduction, mémorisé par navigateur
+const COTE_MAX_DEFAUT = "2000";
 
 let config = null;          // réponse de /api/parametres
 let travail = null;         // travail ouvert (réponse de /api/travaux/<id>)
@@ -140,7 +142,7 @@ function envoyer(fichier) {
   barre.hidden = false;
   barre.value = 0;
   const requete = new XMLHttpRequest();
-  requete.open("POST", "/api/travaux");
+  requete.open("POST", `/api/travaux?cote_max=${encodeURIComponent($("#cote-max").value)}`);
   requete.setRequestHeader("X-Nom-Fichier", encodeURIComponent(fichier.name));
   requete.upload.onprogress = (e) => { if (e.lengthComputable) barre.value = e.loaded / e.total; };
   requete.onload = () => {
@@ -157,6 +159,14 @@ function envoyer(fichier) {
 function brancherEnvoi() {
   const zone = $("#zone-envoi");
   const champ = $("#champ-fichier");
+  const reduction = $("#cote-max");
+  let choix = null;
+  try { choix = localStorage.getItem(CLE_COTE_MAX); } catch { /* stockage indisponible */ }
+  reduction.value = choix ?? COTE_MAX_DEFAUT;
+  if (!reduction.value) reduction.value = COTE_MAX_DEFAUT;  // valeur mémorisée inconnue
+  reduction.addEventListener("change", () => {
+    try { localStorage.setItem(CLE_COTE_MAX, reduction.value); } catch { /* tant pis */ }
+  });
   champ.addEventListener("change", () => { envoyer(champ.files[0]); champ.value = ""; });
   zone.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); champ.click(); } });
   // glisser-déposer n'importe où sur l'accueil
@@ -190,7 +200,9 @@ async function ouvrirTravail(id) {
   document.title = `${travail.nom} · img2svg2gcode`;
   $("#nom-travail").textContent = travail.nom;
   $("#nom-travail").title = travail.nom;
-  $("#taille-travail").textContent = `${travail.largeur_px} × ${travail.hauteur_px} px`;
+  const [largeurOrigine, hauteurOrigine] = travail.taille_origine || [travail.largeur_px, travail.hauteur_px];
+  $("#taille-travail").textContent = `${travail.largeur_px} × ${travail.hauteur_px} px` +
+    (largeurOrigine !== travail.largeur_px ? ` (réduite, originale ${largeurOrigine} × ${hauteurOrigine})` : "");
   $("#vignette-entree").src = `/api/travaux/${id}/miniatures/entree/entree.png?taille=200`;
   $("#lien-journal").href = `/api/travaux/${id}/journal.txt`;
   valeurs = { ...travail.parametres };

@@ -22,6 +22,18 @@
         <span>ou clique pour en choisir une (JPG, PNG…)</span>
         <progress id="progression-envoi" max="1" value="0" hidden></progress>
       </label>
+      <div class="option-envoi">
+        <label for="cote-max">Réduire les grandes images à l'envoi</label>
+        <select id="cote-max">
+          <option value="0">non, taille d'origine</option>
+          <option value="1000">1000 px</option>
+          <option value="1500">1500 px</option>
+          <option value="2000">2000 px</option>
+          <option value="3000">3000 px</option>
+        </select>
+        <span class="discret">(côté le plus long) Plus petite, l'image se calcule bien plus vite, mais les hachures,
+          réglées en pixels, sont plus espacées sur le dessin.</span>
+      </div>
       <h2>Travaux</h2>
       <p id="aucun-travail" class="discret" hidden>Aucun travail pour l'instant.</p>
       <ul id="liste-travaux" class="liste-travaux"></ul>

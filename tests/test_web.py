@@ -204,3 +204,33 @@ def test_travaux_interrompus_au_redemarrage(tmp_path):
     etat_json.write_text(json.dumps(etat))
     with TestClient(web.creer_app(tmp_path / "travaux")) as client:
         assert client.get(f"/api/travaux/{id_travail}").json()["execution"]["etat"] == "interrompu"
+
+
+# --- réduction à l'envoi ----------------------------------------------------------
+def test_reduction_a_l_envoi(client):
+    infos = client.post("/api/travaux?cote_max=100", content=_png(240, 120)).json()
+    assert (infos["largeur_px"], infos["hauteur_px"], infos["taille_origine"]) == (100, 50, [240, 120])
+    entree = Image.open(io.BytesIO(client.get(f"/api/travaux/{infos['id']}/entree.png").content))
+    assert entree.size == (100, 50)
+    # jamais d'agrandissement ; 0 = pas de réduction
+    for option in ["?cote_max=5000", "?cote_max=0", ""]:
+        infos = client.post(f"/api/travaux{option}", content=_png(240, 120)).json()
+        assert (infos["largeur_px"], infos["hauteur_px"]) == (240, 120), option
+
+
+@pytest.mark.parametrize("valeur", ["abc", "50", "20000", "-100"])
+def test_reduction_valeur_refusee(client, valeur):
+    assert client.post(f"/api/travaux?cote_max={valeur}", content=_png()).status_code == 400
+
+
+def test_reduction_et_limites_de_pixels(tmp_path, monkeypatch):
+    monkeypatch.setattr(web, "PIXELS_MAX", 100 * 100)
+    with TestClient(web.creer_app(tmp_path / "travaux")) as client:
+        grande = _png(200, 100)  # 20 000 px : trop pour l'image de travail…
+        reponse = client.post("/api/travaux", content=grande)
+        assert reponse.status_code == 413 and "réduction" in reponse.json()["erreur"]
+        # … acceptée une fois réduite à 100 × 50
+        assert client.post("/api/travaux?cote_max=100", content=grande).status_code == 201
+        # la limite sur l'original s'applique même avec réduction (mémoire)
+        monkeypatch.setattr(web, "PIXELS_MAX_ORIGINAL", 150 * 100)
+        assert client.post("/api/travaux?cote_max=100", content=grande).status_code == 413

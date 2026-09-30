@@ -112,13 +112,23 @@ Chaque image envoyée crée un *travail* : un dossier dans `travaux/` (ignoré p
 
 #### Accès depuis le tailnet (Tailscale)
 
-Le serveur n'écoute que sur `127.0.0.1`. Pour l'ouvrir aux appareils du tailnet, en HTTPS :
+Par défaut, le serveur n'écoute que sur `127.0.0.1`. Deux façons de l'ouvrir aux appareils du tailnet :
 
-```bash
-tailscale serve --bg 8765          # https://<machine>.<tailnet>.ts.net
-tailscale serve status
-tailscale serve reset              # pour arrêter de le partager
-```
+- **directement**, en écoutant sur l'IP Tailscale de la machine (en HTTP ; le trafic du tailnet est de toute façon chiffré) :
+
+  ```bash
+  uv run web.py --hote "$(tailscale ip -4)"    # http://<machine>.<tailnet>.ts.net:8765
+  ```
+
+- **avec `tailscale serve`**, en HTTPS. Pour ne pas entrer en conflit avec d'autres projets servis sur le port 443 de la même machine, on lui donne un port à lui (8443 est aussi accepté par `tailscale funnel`) :
+
+  ```bash
+  tailscale serve --bg --https=8443 8765      # https://<machine>.<tailnet>.ts.net:8443
+  tailscale serve status
+  tailscale serve --https=8443 off            # arrête ce partage seulement
+  ```
+
+  Éviter `tailscale serve reset`, qui efface aussi les configurations des autres projets.
 
 Il n'y a **pas d'authentification** : c'est le tailnet qui en tient lieu. Avant de l'exposer publiquement avec `tailscale funnel`, il faudra ajouter un mot de passe.
 

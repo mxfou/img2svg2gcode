@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>img2svg2gcode</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='11' cy='12' r='8' fill='%2300aeef' fill-opacity='.8'/%3E%3Ccircle cx='21' cy='12' r='8' fill='%23ec008c' fill-opacity='.8'/%3E%3Ccircle cx='16' cy='20' r='8' fill='%23fff200' fill-opacity='.8'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="barre">
+    <a class="logo" href="#/">img2svg2gcode</a>
+    <span class="sous-titre">image → gravure CMJN → G-code</span>
+  </header>
+
+  <main>
+    <!-- Accueil : envoi d'une image + liste des travaux -->
+    <section id="vue-accueil" hidden>
+      <label id="zone-envoi" class="zone-envoi" tabindex="0">
+        <input id="champ-fichier" type="file" accept="image/*" hidden>
+        <strong>Glisse une image ici</strong>
+        <span>ou clique pour en choisir une (JPG, PNG…)</span>
+        <progress id="progression-envoi" max="1" value="0" hidden></progress>
+      </label>
+      <h2>Travaux</h2>
+      <p id="aucun-travail" class="discret" hidden>Aucun travail pour l'instant.</p>
+      <ul id="liste-travaux" class="liste-travaux"></ul>
+    </section>
+
+    <!-- Un travail : paramètres à gauche, exécution et résultats à droite -->
+    <section id="vue-travail" class="travail" hidden>
+      <aside class="colonne-parametres">
+        <div class="carte image-entree">
+          <img id="vignette-entree" alt="image d'entrée">
+          <div>
+            <strong id="nom-travail"></strong>
+            <span id="taille-travail" class="discret"></span>
+            <a href="#/" class="discret">← tous les travaux</a>
+          </div>
+        </div>
+        <div class="actions-globales">
+          <button id="btn-tout" class="principal">▶ Tout exécuter</button>
+          <button id="btn-defaut-tout" class="secondaire">Paramètres par défaut</button>
+        </div>
+        <div id="etapes"></div>
+      </aside>
+
+      <section class="colonne-resultats">
+        <div class="carte">
+          <div class="entete-execution">
+            <h2>Exécution</h2>
+            <span id="badge-etat" class="badge"></span>
+            <button id="btn-annuler" class="danger" hidden>Annuler</button>
+          </div>
+          <ol id="frise" class="frise"></ol>
+          <details id="bloc-journal" open>
+            <summary>Journal <a id="lien-journal" class="discret" target="_blank">(fichier complet)</a></summary>
+            <pre id="journal"></pre>
+          </details>
+        </div>
+
+        <div class="carte">
+          <div class="onglets" role="tablist">
+            <button role="tab" data-onglet="apercu" aria-selected="true">Aperçu</button>
+            <button role="tab" data-onglet="etapes-images">Étapes</button>
+            <button role="tab" data-onglet="telechargements">Téléchargements</button>
+          </div>
+          <div id="onglet-apercu" class="onglet"></div>
+          <div id="onglet-etapes-images" class="onglet" hidden></div>
+          <div id="onglet-telechargements" class="onglet" hidden></div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <div id="notification" class="notification" role="status" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

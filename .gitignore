@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Interface web : travaux (images envoyées et résultats)
+travaux/

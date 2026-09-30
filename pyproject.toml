@@ -11,11 +11,14 @@ dependencies = [
     "pillow>=12.2.0",
     "pyautotrace>=0.0.7",
     "scipy>=1.17.1",
+    "starlette>=1.7.0",
     "svgpathtools>=1.7.2",
+    "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]
 dev = [
+    "httpx2>=2.13.1",
     "pdoc>=16.0.0",
     "pytest>=9.1.1",
 ]

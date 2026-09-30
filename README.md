@@ -110,6 +110,8 @@ Même couverture que l'interface graphique, depuis un navigateur (ordinateur ou 
 
 **Pourquoi réduire ?** Les étapes 1 à 5 travaillent pixel par pixel : sur le Raspberry Pi 5, une photo de téléphone de 12,5 Mpx (3072 × 4080) a pris 19 minutes, dont 15 pour la gravure, contre moins de 2 minutes pour une image de 1 Mpx. Mais la réduction change aussi le rendu : l'espacement des hachures de la gravure est fixé en pixels, donc à taille de dessin égale (en mm), une image plus petite donne des traits plus espacés.
 
+Après une mise à jour du serveur, une page restée ouverte le détecte (empreinte des fichiers de `web/`, vérifiée à chaque navigation, au retour sur l'onglet et avant chaque envoi) et se recharge d'elle-même ; si des réglages modifiés n'ont pas encore été lancés, elle affiche un message au lieu de les perdre.
+
 Chaque image envoyée crée un *travail* : un dossier dans `travaux/` (ignoré par git) qui contient l'image, les paramètres (`parametres.json`), le journal et les sous-dossiers `1-cmyk` à `8-preview`. Les calculs passent par une file d'attente et s'exécutent un par un, chacun dans un processus qui lance `cli.py`.
 
 #### Accès depuis le tailnet (Tailscale)

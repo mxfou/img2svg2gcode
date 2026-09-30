@@ -24,6 +24,7 @@ commande, et un plantage du calcul ne fait pas tomber le serveur.
 import argparse
 import asyncio
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -105,6 +106,29 @@ ETATS_ACTIFS = {"en_attente", "en_cours"}
 
 def _maintenant():
     return time.strftime("%Y-%m-%dT%H:%M:%S")
+
+
+def version_interface(dossier=RACINE / "web"):
+    """Empreinte des fichiers de la page : change dès que l'un d'eux est
+    modifié sur le disque. Une page ouverte la compare à celle qu'elle a
+    chargée pour savoir si elle doit se recharger."""
+    empreinte = hashlib.sha256()
+    for fichier in sorted(Path(dossier).iterdir()):
+        if fichier.is_file():
+            empreinte.update(fichier.name.encode())
+            empreinte.update(fichier.read_bytes())
+    return empreinte.hexdigest()[:12]
+
+
+class FichiersPage(StaticFiles):
+    """Fichiers de la page servis avec Cache-Control: no-cache : le navigateur
+    les revalide (ETag) à chaque chargement au lieu de garder une ancienne
+    version en cache après une mise à jour."""
+
+    def file_response(self, *args, **kwargs):
+        reponse = super().file_response(*args, **kwargs)
+        reponse.headers["Cache-Control"] = "no-cache"
+        return reponse
 
 
 def _derniere_etape(texte):
@@ -398,8 +422,14 @@ def _fichier_du_travail(travaux, id_travail, dossier, nom):
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+async def route_version(request):
+    return JSONResponse({"version": await run_in_threadpool(version_interface)},
+                        headers={"Cache-Control": "no-store"})
+
+
 async def route_parametres(request):
     return JSONResponse({
+        "version": await run_in_threadpool(version_interface),
         "parametres": PARAMETRES,
         "etapes": [{"commande": c, "dossier": d, "libelle": l} for c, d, l in ETAPES],
         "limites": {"taille_max_envoi": TAILLE_MAX_ENVOI, "pixels_max": PIXELS_MAX,
@@ -632,6 +662,7 @@ def creer_app(dossier_travaux=RACINE / "travaux"):
     id_ = "{id:str}"
     routes = [
         Route("/api/parametres", route_parametres),
+        Route("/api/version", route_version),
         Route("/api/travaux", route_liste, methods=["GET"]),
         Route("/api/travaux", route_creer, methods=["POST"], max_body_size=TAILLE_MAX_ENVOI),
         Route(f"/api/travaux/{id_}", route_travail, methods=["GET"]),
@@ -644,7 +675,7 @@ def creer_app(dossier_travaux=RACINE / "travaux"):
         Route(f"/api/travaux/{id_}/gcode.zip", route_zip_gcode),
         Route(f"/api/travaux/{id_}/fichiers/{{dossier:str}}/{{nom:str}}", route_fichier),
         Route(f"/api/travaux/{id_}/miniatures/{{dossier:str}}/{{nom:str}}", route_miniature),
-        Mount("/", StaticFiles(directory=RACINE / "web", html=True)),
+        Mount("/", FichiersPage(directory=RACINE / "web", html=True)),
     ]
     return Starlette(routes=routes, lifespan=cycle_de_vie,
                      exception_handlers={HTTPException: erreur_http})

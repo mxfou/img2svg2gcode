@@ -13,7 +13,7 @@ const CANAUX_1_CMYK = ["cyan", "magenta", "yellow", "black"]; // image_000000 �
 const CLE_COTE_MAX = "img2svg2gcode.cote_max";   // choix de réduction, mémorisé par navigateur
 const COTE_MAX_DEFAUT = "2000";
 
-let config = null;          // réponse de /api/parametres
+let config = null;          // réponse de /api/parametres (dont la version de la page chargée)
 let travail = null;         // travail ouvert (réponse de /api/travaux/<id>)
 let flux = null;            // EventSource du journal
 let valeurs = {};           // paramètres affichés dans le formulaire
@@ -83,6 +83,30 @@ function urlMiniature(dossier, nom, px) {
 }
 
 // ---------------------------------------------------------------------------
+// Mise à jour de l'interface : une page restée ouverte pendant une mise à
+// jour du serveur ne doit pas continuer avec l'ancien code (par exemple
+// envoyer une image sans l'option de réduction qu'elle ne connaît pas).
+// ---------------------------------------------------------------------------
+async function pageObsolete() {
+  try {
+    const { version } = await api("/api/version");
+    return version !== config.version;
+  } catch {
+    return false;  // serveur injoignable : on ne recharge pas à l'aveugle
+  }
+}
+
+async function verifierVersion() {
+  if (!(await pageObsolete())) return;
+  if (document.querySelector("#vue-travail:not([hidden]) .modifie")) {
+    // des réglages non lancés seraient perdus : on prévient au lieu de recharger
+    notifier("Nouvelle version de l'interface disponible : recharge la page quand tu auras lancé tes réglages.");
+  } else {
+    location.reload();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Navigation : #/ (accueil) ou #/travail/<id>
 // ---------------------------------------------------------------------------
 function router() {
@@ -132,8 +156,13 @@ function carteTravail(resume) {
           el("button", { class: "petit danger", onclick: supprimer, disabled: estActif(execution) }, "Supprimer")))));
 }
 
-function envoyer(fichier) {
+async function envoyer(fichier) {
   if (!fichier) return;
+  if (await pageObsolete()) {
+    notifier("L'interface vient d'être mise à jour : la page se recharge, renvoie ensuite ton image.");
+    setTimeout(() => location.reload(), 2500);
+    return;
+  }
   if (fichier.size > config.limites.taille_max_envoi) {
     notifier(`Fichier trop gros (maximum ${Math.round(config.limites.taille_max_envoi / 2 ** 20)} Mo)`, true);
     return;
@@ -565,7 +594,9 @@ async function demarrer() {
       if (p.cle !== "redimensionner_facteur_echelle") controles[p.cle]?.(p.defaut);
     }
   });
-  window.addEventListener("hashchange", router);
+  window.addEventListener("hashchange", () => { verifierVersion(); router(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) verifierVersion(); });
+  setInterval(verifierVersion, 5 * 60 * 1000);
   router();
 }
 

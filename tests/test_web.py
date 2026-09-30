@@ -234,3 +234,24 @@ def test_reduction_et_limites_de_pixels(tmp_path, monkeypatch):
         # la limite sur l'original s'applique même avec réduction (mémoire)
         monkeypatch.setattr(web, "PIXELS_MAX_ORIGINAL", 150 * 100)
         assert client.post("/api/travaux?cote_max=100", content=grande).status_code == 413
+
+
+# --- mise à jour de la page -------------------------------------------------------
+def test_version_interface(tmp_path):
+    (tmp_path / "app.js").write_text("console.log(1)")
+    (tmp_path / "index.html").write_text("<p>")
+    v1 = web.version_interface(tmp_path)
+    assert web.version_interface(tmp_path) == v1
+    (tmp_path / "app.js").write_text("console.log(2)")
+    assert web.version_interface(tmp_path) != v1
+
+
+def test_version_et_cache_des_fichiers_de_la_page(client):
+    version = client.get("/api/version")
+    assert version.json()["version"] == web.version_interface() == client.get("/api/parametres").json()["version"]
+    assert version.headers["cache-control"] == "no-store"
+    for chemin in ["/", "/app.js", "/style.css"]:
+        reponse = client.get(chemin)
+        assert reponse.status_code == 200 and reponse.headers["cache-control"] == "no-cache", chemin
+        revalidation = client.get(chemin, headers={"If-None-Match": reponse.headers["etag"]})
+        assert revalidation.status_code == 304 and revalidation.headers["cache-control"] == "no-cache", chemin

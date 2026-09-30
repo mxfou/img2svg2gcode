@@ -67,6 +67,7 @@ uv sync
 | `pillow` | lecture des images (PIL) |
 | `scipy` | k-d tree (`scipy.spatial.cKDTree`) pour l'optimisation du parcours |
 | `guizero` | interface graphique simple |
+| `starlette`, `uvicorn` | interface web |
 | `svgpathtools` | lecture des SVG d'AutoTrace, longueurs et points des courbes de Bézier |
 | `gmic-py` | binding Python de G'MIC pour les filtres image |
 | `autotrace` | binding Python d'AutoTrace pour la vectorisation |
@@ -91,6 +92,35 @@ uv run main.py
 ```
 
 L'interface graphique s'ouvre avec **un panneau par étape** du pipeline. Le calcul tourne dans un processus séparé : la fenêtre reste utilisable, les boutons *exécute* sont grisés pendant le traitement et une ligne de statut indique l'étape en cours, puis *terminé* ou *échec* (le détail s'affiche dans le terminal).
+
+### Interface web
+
+```bash
+uv run web.py                      # http://127.0.0.1:8765
+uv run web.py --port 9000 --dossier-travaux ~/travaux
+```
+
+Même couverture que l'interface graphique, depuis un navigateur (ordinateur ou téléphone) :
+
+- envoi d'une image par glisser-déposer ou sélection ;
+- tous les paramètres, étape par étape, avec la taille du dessin (largeur, hauteur et facteur synchronisés) et les options de l'aperçu ;
+- pipeline complet ou une seule étape, avec le journal et la progression en direct, et un bouton pour annuler ;
+- aperçu CMJN, images intermédiaires de chaque étape, téléchargement du G-code en zip ;
+- historique des travaux.
+
+Chaque image envoyée crée un *travail* : un dossier dans `travaux/` (ignoré par git) qui contient l'image, les paramètres (`parametres.json`), le journal et les sous-dossiers `1-cmyk` à `8-preview`. Les calculs passent par une file d'attente et s'exécutent un par un, chacun dans un processus qui lance `cli.py`.
+
+#### Accès depuis le tailnet (Tailscale)
+
+Le serveur n'écoute que sur `127.0.0.1`. Pour l'ouvrir aux appareils du tailnet, en HTTPS :
+
+```bash
+tailscale serve --bg 8765          # https://<machine>.<tailnet>.ts.net
+tailscale serve status
+tailscale serve reset              # pour arrêter de le partager
+```
+
+Il n'y a **pas d'authentification** : c'est le tailnet qui en tient lieu. Avant de l'exposer publiquement avec `tailscale funnel`, il faudra ajouter un mot de passe.
 
 ### Tests
 
@@ -288,6 +318,8 @@ Pour chaque couleur :
 .
 ├── img_process.py    ← logique du pipeline (8 étapes)
 ├── main.py           ← interface graphique (guizero)
+├── web.py            ← interface web : serveur Starlette (API + file d'exécution)
+├── web/              ← interface web : page HTML/CSS/JS, sans dépendance
 ├── cli.py            ← ligne de commande
 ├── tests/            ← tests pytest (uv run pytest)
 └── README.md         ← ce fichier

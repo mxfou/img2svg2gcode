@@ -1,0 +1,34 @@
+# Interface web d'img2svg2gcode en service utilisateur systemd sur le Pi : elle démarre au boot et redémarre
+# après un plantage. Elle tourne depuis un clone séparé du dépôt de développement, mis à jour par git pull :
+# seul le code commité sur main est en service.
+#
+#   git clone ~/prog/img2svg2gcode ~/services/img2svg2gcode
+#   (cd ~/services/img2svg2gcode && uv sync --frozen)
+#   mkdir -p ~/.config/systemd/user && cp img2svg2gcode-web.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now img2svg2gcode-web
+#   loginctl enable-linger "$USER"          # garde le service actif sans session ouverte
+#
+# Mise à jour : git -C ~/services/img2svg2gcode pull && systemctl --user restart img2svg2gcode-web
+# Journal :     journalctl --user-unit img2svg2gcode-web -f
+#
+# Le serveur écoute sur l'IP Tailscale du Pi, lue à chaque démarrage (tailscale ip -4) : il n'est joignable
+# que depuis le tailnet. Au boot, si Tailscale n'a pas encore son adresse, le démarrage échoue (jamais
+# d'écoute sur toutes les interfaces) et Restart= le relance.
+[Unit]
+Description=img2svg2gcode : interface web (tailnet uniquement)
+
+[Service]
+WorkingDirectory=%h/services/img2svg2gcode
+# $$ : un $ littéral pour le shell (systemd remplace lui-même les $VARIABLE)
+ExecStart=/bin/sh -c 'hote=$$(tailscale ip -4) && [ -n "$$hote" ] && \
+    exec %h/.local/bin/uv run --frozen web.py --hote "$$hote"'
+Environment=PYTHONUNBUFFERED=1
+# uv sort avec le code 143 quand systemd l'arrête (SIGTERM) : c'est un arrêt normal.
+SuccessExitStatus=143
+Restart=always
+RestartSec=10
+# Les calculs occupent les 4 cœurs pendant plusieurs minutes : priorité basse pour garder le Pi réactif.
+Nice=10
+
+[Install]
+WantedBy=default.target

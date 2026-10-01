@@ -136,6 +136,24 @@ Par défaut, le serveur n'écoute que sur `127.0.0.1`. Deux façons de l'ouvrir 
 
 Il n'y a **pas d'authentification** : c'est le tailnet qui en tient lieu. Avant de l'exposer publiquement avec `tailscale funnel`, il faudra ajouter un mot de passe.
 
+#### Service permanent sur le Raspberry Pi
+
+Sur le Pi, l'interface tourne en continu comme service utilisateur systemd (`img2svg2gcode-web.service`) : elle démarre au boot, sans session ouverte, redémarre après un plantage et écoute sur l'IP Tailscale (`http://<machine>.<tailnet>.ts.net:8765`). Les calculs tournent en priorité basse (`Nice=10`) pour que le reste du Pi reste réactif.
+
+Le service tourne depuis un **clone séparé** du dépôt, `~/services/img2svg2gcode`, et pas depuis le dépôt de développement : comme chaque calcul relance `cli.py`, une modification en cours y serait sinon prise en compte immédiatement. Seul le code commité sur `main` est en service. Les travaux sont rangés dans `~/services/img2svg2gcode/travaux/`.
+
+L'installation est décrite en tête du fichier `img2svg2gcode-web.service`. Au quotidien :
+
+```bash
+git -C ~/services/img2svg2gcode pull && systemctl --user restart img2svg2gcode-web   # mettre en service les derniers commits
+systemctl --user status img2svg2gcode-web
+journalctl --user-unit img2svg2gcode-web -f
+```
+
+Un redémarrage coupe le calcul en cours. Les pages ouvertes se rechargent d'elles-mêmes si `web/` a changé.
+
+Une instance de développement (`uv run web.py`, sur `127.0.0.1`) peut tourner en même temps que le service. Pour l'ouvrir aussi au tailnet, il faut lui donner un autre port : `--hote "$(tailscale ip -4)" --port 8766`.
+
 ### Tests
 
 ```bash

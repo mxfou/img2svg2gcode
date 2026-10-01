@@ -150,7 +150,7 @@ systemctl --user status img2svg2gcode-web
 journalctl --user-unit img2svg2gcode-web -f
 ```
 
-Un redémarrage coupe le calcul en cours. Les pages ouvertes se rechargent d'elles-mêmes si `web/` a changé.
+Un redémarrage coupe le calcul en cours, qui apparaît alors comme *interrompu*. Les pages ouvertes se rechargent d'elles-mêmes si `web/` a changé.
 
 Une instance de développement (`uv run web.py`, sur `127.0.0.1`) peut tourner en même temps que le service. Pour l'ouvrir aussi au tailnet, il faut lui donner un autre port : `--hote "$(tailscale ip -4)" --port 8766`.
 

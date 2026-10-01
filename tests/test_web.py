@@ -2,6 +2,8 @@
 
 import io
 import json
+import os
+import signal
 import time
 import zipfile
 from pathlib import Path
@@ -192,6 +194,19 @@ def test_annulation_et_file_d_attente(client):
     assert infos_a["execution"]["etat"] == "annule" and infos_a["execution"]["code"] < 0
     # B, annulé pendant l'attente, n'a jamais démarré
     assert client.get(f"/api/travaux/{b}").json()["execution"]["debut"] is None
+
+
+def test_calcul_arrete_de_l_exterieur(client):
+    # systemd arrête le service : SIGTERM à tous ses processus, calcul compris
+    id_travail = _creer(client)["id"]
+    client.post(f"/api/travaux/{id_travail}/executer", json={"commande": "tout"})
+    processus = client.app.state.travaux.processus
+    fin = time.time() + 30
+    while id_travail not in processus and time.time() < fin:
+        time.sleep(0.1)
+    os.killpg(processus[id_travail].pid, signal.SIGTERM)
+    execution = _attendre(client, id_travail, delai=30)["execution"]
+    assert execution["etat"] == "interrompu" and execution["code"] == -signal.SIGTERM
 
 
 def test_travaux_interrompus_au_redemarrage(tmp_path):

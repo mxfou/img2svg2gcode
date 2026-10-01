@@ -347,6 +347,9 @@ class Travaux:
         if id_travail in self.annulations:
             self.annulations.discard(id_travail)
             resultat = "annule"
+        elif code == -signal.SIGTERM:
+            # arrêté de l'extérieur (systemd qui arrête le service, kill) : le calcul n'a pas échoué
+            resultat = "interrompu"
         else:
             resultat = "termine" if code == 0 else "echec"
         etat["execution"].update(etat=resultat, fin=_maintenant(), code=code)
